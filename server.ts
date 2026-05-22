@@ -72,25 +72,73 @@ try {
 }
 
 // --- Firebase Admin Instance Proxy (Lazy Loaded to prevent module-load crashes on Vercel) ---
+const isFirestoreEnabled = () => {
+  if (admin.apps.length === 0) return false;
+  
+  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.trim();
+  const hasServiceAccount = !!(clientEmail && privateKey);
+  
+  if (hasServiceAccount) return true;
+  
+  // If in production or on Vercel but missing service account credentials,
+  // firebase-admin queries will block on GCP metadata servers (169.254.169.254) and timeout, causing 500s.
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    console.warn("Firestore access disabled to prevent metadata hang. Missing GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY on Vercel/production.");
+    return false;
+  }
+  
+  return true;
+};
+
+const createMockFirestore = () => {
+  const mockDoc: any = {
+    set: async () => ({}),
+    get: async () => ({ exists: false, data: () => null }),
+    update: async () => ({}),
+    delete: async () => ({}),
+    collection: () => mockCollection
+  };
+  
+  const mockQuery: any = {
+    limit: () => mockQuery,
+    orderBy: () => mockQuery,
+    get: async () => ({ docs: [], size: 0 })
+  };
+  
+  const mockCollection: any = {
+    doc: () => mockDoc,
+    limit: () => mockQuery,
+    orderBy: () => mockQuery,
+    get: async () => ({ docs: [], size: 0 })
+  };
+  
+  const mockBatch: any = {
+    set: () => mockBatch,
+    update: () => mockBatch,
+    delete: () => mockBatch,
+    commit: async () => {}
+  };
+  
+  return {
+    collection: (name: string) => mockCollection,
+    batch: () => mockBatch,
+  } as any;
+};
+
 let firestoreInstance: admin.firestore.Firestore | null = null;
 const getFirestoreInstance = () => {
   if (!firestoreInstance) {
-    if (admin.apps.length === 0) {
-      console.warn("Firebase App is not initialized yet. Returning fallback mock to prevent crash.");
-      // Return a basic mock to prevent immediate throw during setup-checks
-      return {
-        collection: () => ({
-          limit: () => ({
-            get: async () => { throw new Error("Firebase not initialized in this environment. Please configure FIREBASE_PROJECT_ID."); }
-          })
-        })
-      } as any;
+    if (!isFirestoreEnabled()) {
+      console.warn("Firestore is disabled or unconfigured in this environment. Initializing safe mock.");
+      firestoreInstance = createMockFirestore();
+      return firestoreInstance;
     }
     try {
       firestoreInstance = (firebaseDatabaseId && firebaseDatabaseId !== "(default)") ? (admin.app() as any).firestore(firebaseDatabaseId) : admin.firestore();
     } catch (err) {
-      console.error("Failed to fetch firestore instance:", err);
-      throw err;
+      console.error("Failed to fetch firestore instance, falling back to mock:", err);
+      firestoreInstance = createMockFirestore();
     }
   }
   return firestoreInstance;
@@ -118,21 +166,19 @@ const db = new Proxy({} as admin.firestore.Firestore, {
 });
 
 // --- Supabase Client & Database Initialization ---
-const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || "";
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://yrbidrfhzuxmxqcboqfd.supabase.co";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlyYmlkcmZoenV4bXhxY2JvcWZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0NDAzMzQsImV4cCI6MjA5NTAxNjMzNH0.TlJGDC6gzho4jWVdrgFyNSSM9Fb0kX6UI5ifXfXwrfQ";
 
 let supabaseClient: any = null;
-if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-  try {
-    supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: {
-        persistSession: false
-      }
-    });
-    console.log("Supabase Client initialized successfully!");
-  } catch (err) {
-    console.error("Failed to initialize Supabase client:", err);
-  }
+try {
+  supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: {
+      persistSession: false
+    }
+  });
+  console.log("Supabase Client initialized successfully!");
+} catch (err) {
+  console.error("Failed to initialize Supabase client:", err);
 }
 
 // Map Supabase flat columns back to the frontend's nested/custom structure
@@ -715,6 +761,18 @@ app.post("/api/claim", async (req, res) => {
     saveLocalJSON(CLAIMS_FILE, fallbackClaims);
     saveLocalJSON(MAIL_MAP_FILE, fallbackEmailMap);
 
+    // --- SUPABASE SYNC (Safe Try-Catch) ---
+    try {
+      if (supabaseClient) {
+        const savedSb = await saveSupabaseClaims(localRows);
+        if (savedSb) {
+          console.log(`Claim ${submissionId} synced to Supabase.`);
+        }
+      }
+    } catch (sbError) {
+      console.error("Supabase Save Error (handled gracefully):", sbError);
+    }
+
     // --- FIRESTORE SYNC (Safe Try-Catch) ---
     try {
       if (admin.apps.length > 0) {
@@ -834,14 +892,22 @@ app.post("/api/claim", async (req, res) => {
 
     // Notify Admins & Branch Head (Safe SMTP routing)
     try {
-      const adminEmails = process.env.ADMIN_EMAILS || "";
+      const adminEmailsRaw = process.env.ADMIN_EMAILS || "mis.mumbai@ginzalimited.com";
+      const adminsList = adminEmailsRaw.split(",").map(e => e.trim()).filter(Boolean);
+      if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
+        adminsList.push("mis.mumbai@ginzalimited.com");
+      }
+      const adminEmails = adminsList.join(",");
       const recipients = branchHeadEmail ? `${adminEmails},${branchHeadEmail}` : adminEmails;
       
+      const emailSubject = `New Claim Submitted - ${salespersonName} (${branchName})`;
+      const emailBody = `Dear Admin,\n\nA new expense claim has been successfully submitted by ${salespersonName}.\n\n--- Claimant Information ---\nName: ${salespersonName}\nEmail: ${salespersonEmail}\nBranch: ${branchName}\nSubmission ID: ${submissionId}\nTotal Amount: ₹${grandTotal}\nTotal Items: ${items.length}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
+
       await sendMail(
         recipients,
         "",
-        `New Multi-Entry Claim: ${salespersonName}`,
-        `A new claim has been submitted by ${salespersonName} (${branchName}).\nTotal Amount: ₹${grandTotal}\nTotal Items: ${items.length}\n\nCheck the sheet: https://docs.google.com/spreadsheets/d/${SHEET_ID}`,
+        emailSubject,
+        emailBody,
         salespersonName,
         salespersonEmail
       );
@@ -1015,6 +1081,25 @@ app.get("/api/claims", async (req, res) => {
     } catch (sheetError: any) {
       console.warn("Google Sheets fetch failed, falling back to database/memory storage:", sheetError.message);
       
+      // Try Supabase claims fallback first
+      try {
+        if (supabaseClient) {
+          const sbClaims = await getSupabaseClaims();
+          if (sbClaims && sbClaims.length > 0) {
+            console.log("Fetched claims from Supabase fallback.");
+            const mergedClaims = [...sbClaims];
+            fallbackClaims.forEach(fc => {
+              if (!mergedClaims.some(c => c.submissionid === fc.submissionid)) {
+                mergedClaims.push(fc);
+              }
+            });
+            return res.json(mergedClaims);
+          }
+        }
+      } catch (sbClaimsErr: any) {
+        console.warn("Supabase claims fetch failed:", sbClaimsErr.message);
+      }
+      
       // 2. Try Firestore claims
       try {
         if (admin.apps.length > 0) {
@@ -1183,6 +1268,34 @@ app.post("/api/admin/action", async (req, res) => {
       console.error("Firestore Admin Update Error (non-blocking):", fsErr);
     }
 
+    // --- SUPABASE UPDATE (Safe Try-Catch) ---
+    try {
+      if (supabaseClient) {
+        const updateFields: any = {};
+        if (action === "REMARK") {
+          updateFields.adminremark = data.remark;
+          updateFields.mailsent = "Yes";
+          updateFields.status = "Remarked";
+        } else if (action === "APPROVE") {
+          updateFields.approved = "Yes";
+          updateFields.approvedtimestamp = `${adminName} - ${timestamp}`;
+          updateFields.status = "Approved";
+        } else if (action === "PROCESS") {
+          updateFields.paymentprocess = "Yes";
+          updateFields.processedby = `${adminName} - ${timestamp}`;
+          updateFields.status = "Processed";
+        } else if (action === "RELEASE") {
+          updateFields.paymentrelease = "Yes";
+          updateFields.releasedby = `${adminName} - ${timestamp}`;
+          updateFields.status = "Released";
+        }
+        await updateSupabaseClaim(claimId, updateFields);
+        console.log(`Supabase synchronized for action ${action} on claim ${claimId}`);
+      }
+    } catch (sbErr) {
+      console.error("Supabase Admin Update Error (non-blocking):", sbErr);
+    }
+
     // --- 3. GOOGLE SHEETS ACCESS (Safe Try-Catch) ---
     try {
       const sheets = await getSheetsClient();
@@ -1232,42 +1345,57 @@ app.post("/api/admin/action", async (req, res) => {
 
     // --- 4. SECURE EMAIL ROUTING ---
     try {
+      const claim = fallbackClaims.find(c => c.submissionid === claimId);
+      const sName = claim ? claim.salespersonname : (data?.salespersonname || "Employee");
+      const sEmail = claim ? (claim.employeeemail || claim.salesperson_email) : (data?.employeeemail || "");
+      const bName = claim ? claim.branchname : (data?.branchname || "Sheet1");
+      const gTotal = claim ? claim.grandtotal : (data?.grandtotal || "0");
+      const bHeadEmail = claim ? claim.branchheademail : (data?.branchheademail || "");
+      
+      const adminEmailsStr = process.env.ADMIN_EMAILS || "mis.mumbai@ginzalimited.com";
+      const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(Boolean);
+      if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
+        adminsList.push("mis.mumbai@ginzalimited.com");
+      }
+      const adminEmails = adminsList.join(",");
+      const accountsMail = process.env.ACCOUNTS_EMAIL || "patilyog345@gmail.com";
+
       if (action === "REMARK") {
         await sendMail(
-          data.employeeemail, 
-          `${process.env.ADMIN_EMAILS || ""},${data.branchheademail || ""}`, 
+          sEmail, 
+          `${adminEmails},${bHeadEmail}`, 
           `Action Required: Expense Claim Update (${claimId})`, 
-          `Dear Employee,\n\nAdmin has left a remark regarding your claim:\n\n"${data.remark}"\n\nPlease check and respond.`,
+          `Dear ${sName},\n\nAdmin (${adminName}) has left a remark regarding your claim:\n\n"${data.remark}"\n\nPlease check and respond in the portal.\n\nThank you,\nExpense Department`,
           adminName,
           adminEmail
         );
       } 
       else if (action === "APPROVE") {
         await sendMail(
-          data.employeeemail,
-          `${process.env.ADMIN_EMAILS || ""},${data.branchheademail || ""}`,
+          sEmail,
+          `${adminEmails},${bHeadEmail}`,
           `Claim Approved: ${claimId}`,
-          `Your expense claim for ₹${data.grandtotal} has been APPROVED by Admin and sent for payment processing.`,
+          `Dear ${sName},\n\nWe are pleased to inform you that your expense claim of ₹${gTotal} has been APPROVED by ${adminName} and has been forwarded for payment processing.\n\nSubmission ID: ${claimId}\nDate: ${timestamp}`,
           adminName,
           adminEmail
         );
       }
       else if (action === "PROCESS") {
         await sendMail(
-          process.env.ACCOUNTS_EMAIL || "",
-          `${data.employeeemail},${data.branchheademail || ""},${process.env.ADMIN_EMAILS || ""}`,
-          `PAYMENT PROCESSING REQUEST: ${data.salespersonname}`,
-          `Dear Accounts Department,\n\nPlease release the payment for the following approved claim:\n\nEmployee: ${data.salespersonname}\nBranch: ${data.branchname}\nAmount: ₹${data.grandtotal}\nSubmission ID: ${claimId}\n\nApproved By: ${adminName}\nTimestamp: ${timestamp}`,
+          accountsMail,
+          `${sEmail},${bHeadEmail},${adminEmails}`,
+          `PAYMENT PROCESSING REQUEST: ${sName}`,
+          `Dear Accounts Department,\n\nPlease release the payment for the following approved claim:\n\nEmployee: ${sName}\nBranch: ${bName}\nAmount: ₹${gTotal}\nSubmission ID: ${claimId}\n\nApproved By: ${adminName}\nTimestamp: ${timestamp}`,
           adminName,
           adminEmail
         );
       }
       else if (action === "RELEASE") {
         await sendMail(
-          data.employeeemail,
-          `${process.env.ADMIN_EMAILS || ""},${data.branchheademail || ""}`,
+          sEmail,
+          `${adminEmails},${bHeadEmail}`,
           `PAYMENT RELEASED: ${claimId}`,
-          `Dear Employee,\n\nWe are pleased to inform you that your expense claim payment of ₹${data.grandtotal} has been released.\n\nTransaction processed by: ${adminName}\nDate: ${timestamp}`,
+          `Dear ${sName},\n\nWe are pleased to inform you that your expense claim payment of ₹${gTotal} has been released.\n\nTransaction processed by: ${adminName}\nDate: ${timestamp}`,
           adminName,
           adminEmail
         );

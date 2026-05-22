@@ -1046,6 +1046,9 @@ function AdminActionDialog({ claim, onAction, group, predefinedAdmin }: { claim:
     branchheademail: branchHeadEmail,
     adminName,
     adminEmail,
+    grandtotal: claim.grandtotal,
+    salespersonname: claim.salespersonname,
+    branchname: claim.branchname,
     ...extra
   });
 
@@ -1058,222 +1061,243 @@ function AdminActionDialog({ claim, onAction, group, predefinedAdmin }: { claim:
           </button>
         }
       />
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col border-2 border-[#141414] shadow-[12px_12px_0px_rgba(20,20,20,1)] p-0 bg-white overflow-hidden">
-        <div className="p-6 overflow-y-auto space-y-6">
-          <div className="flex justify-between items-start">
-            <div className="space-y-1">
-              <Badge className="bg-[#141414] text-white text-[8px] px-2 py-0 font-bold uppercase tracking-widest">Review Portal</Badge>
-              <h2 className="text-2xl font-black uppercase tracking-tight leading-none pt-1">{claim.salespersonname}</h2>
-              <div className="flex items-center gap-2">
-                <Mail className="w-3 h-3 text-blue-600" />
-                <span className="text-[11px] font-bold text-blue-600 underline">{claim.employeeemail || 'No Email Found'}</span>
-              </div>
-              <p className="text-[10px] opacity-40 uppercase font-mono">{claim.submissionid} | {claim.branchname}</p>
+      <DialogContent className="max-w-4xl w-[95vw] max-h-[92vh] flex flex-col border-3 border-[#141414] shadow-[12px_12px_0px_rgba(20,20,20,1)] p-0 bg-white overflow-hidden">
+        <div className="bg-[#141414] text-white p-4 flex justify-between items-center border-b-2 border-[#141414]">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-green-400" />
+            <div>
+              <h2 className="text-sm font-black uppercase tracking-wider leading-none">Administrative Review Portal</h2>
+              <p className="text-[10px] text-slate-400 font-mono mt-0.5 uppercase">ID: {claim.submissionid}</p>
             </div>
-            <div className="text-right space-y-2">
-              <div className="bg-yellow-50 border-2 border-yellow-400 p-2 rounded shadow-[4px_4px_0px_rgba(161,98,7,0.2)]">
-                <Label className="text-[8px] font-black uppercase opacity-60 block text-right tracking-widest">Active Administrator</Label>
-                <div className="text-[11px] font-black text-[#141414] uppercase">{adminName}</div>
-                <div className="text-[9px] opacity-70 font-mono">{adminEmail}</div>
-                <p className="text-[7px] mt-1 text-yellow-700 italic font-bold leading-none">* Mails will be sent as {adminName}</p>
+          </div>
+          <Badge className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-[9px] uppercase px-2.5 py-0.5 tracking-wider font-mono">
+            {claim.branchname}
+          </Badge>
+        </div>
+
+        <div className="p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar">
+          {/* Header Card / Identity */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-slate-50 p-4 border-2 border-[#141414] rounded-xl shadow-[4px_4px_0px_rgba(20,20,20,0.05)]">
+            <div className="md:col-span-7 space-y-2">
+              <span className="text-[8px] font-black uppercase tracking-widest bg-blue-100 text-blue-800 px-2 py-0.5 rounded-sm">Claimant Employee Details</span>
+              <h3 className="text-xl font-black uppercase tracking-tight text-[#141414] leading-none pt-1">
+                {claim.salespersonname}
+              </h3>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs">
+                <span className="flex items-center gap-1.5 font-bold text-slate-700">
+                  <Mail className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <span className="underline">{claim.employeeemail || 'No Email Found'}</span>
+                </span>
+                <span className="opacity-40 hidden sm:block">|</span>
+                <span className="text-slate-500 font-mono text-[11px]">
+                  Submitted on: {claim.timestamp}
+                </span>
+              </div>
+            </div>
+            <div className="md:col-span-5 flex items-center md:justify-end">
+              <div className="bg-yellow-50 border-2 border-yellow-400 p-3 rounded-lg shadow-[3px_3px_0px_rgba(161,98,7,0.15)] w-full md:w-auto">
+                <span className="text-[8px] font-black uppercase opacity-60 block tracking-wider leading-none mb-1">Active Administrator</span>
+                <div className="text-[11px] font-black text-[#141414] uppercase leading-snug">{adminName}</div>
+                <div className="text-[9px] opacity-70 font-mono leading-none mt-0.5">{adminEmail}</div>
+                <p className="text-[8px] mt-1.5 text-yellow-800 font-medium leading-none italic">* Outbox route replies directly to {adminEmail}</p>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between border-b-2 border-[#141414] pb-1">
-                <p className="text-[10px] font-black uppercase tracking-tight">Summary by Category</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-[10px] bg-slate-50 p-2 rounded border border-[#141414]/5">
-                {Object.entries(group.reduce((acc: any, item) => {
-                  acc[item.expensecategory] = (acc[item.expensecategory] || 0) + Number(item.amount);
-                  return acc;
-                }, {})).map(([cat, amt]: any) => (
-                  <div key={cat} className="flex justify-between border-b border-dashed border-[#141414]/10 pb-1">
-                    <span className="font-bold opacity-60 uppercase">{cat}:</span>
-                    <span className="font-black text-blue-900">₹{amt}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex items-center justify-between border-b-2 border-[#141414] pb-1 pt-2">
-                <p className="text-[10px] font-black uppercase tracking-tight">Itemized Breakdown ({group.length})</p>
-                <div className="bg-[#141414] text-white text-[10px] px-2 py-0.5 rounded font-black">
-                  ₹{claim.grandtotal}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">
+            {/* Left Column: Breakdown details */}
+            <div className="lg:col-span-7 space-y-4">
+              {/* Category summary banner */}
+              <div>
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Summary by Category</span>
+                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                  {Object.entries(group.reduce((acc: any, item) => {
+                    acc[item.expensecategory] = (acc[item.expensecategory] || 0) + Number(item.amount);
+                    return acc;
+                  }, {})).map(([cat, amt]: any) => (
+                    <div key={cat} className="bg-slate-50/80 border border-slate-200 rounded p-2 flex justify-between items-center">
+                      <span className="font-bold opacity-75 uppercase">{cat}:</span>
+                      <span className="font-black text-blue-950 text-xs">₹{amt}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
-              
-              <div className="max-h-[380px] overflow-y-auto pr-2 space-y-2 custom-scrollbar">
-                {group.map((item, idx) => (
-                  <div key={idx} className="bg-slate-50 border border-[#141414]/10 rounded-md p-3 hover:bg-white hover:border-[#141414]/30 transition-all border-l-4 border-l-blue-500 shadow-sm">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge variant="outline" className="text-[9px] font-black uppercase border-blue-200 bg-blue-50 text-blue-700 h-4 px-1.5 rounded-sm">
-                            {item.expensecategory}
-                          </Badge>
-                          <span className="text-[9px] opacity-40 font-mono">{item.itemdate}</span>
-                        </div>
-                        <p className="text-[11px] font-bold leading-tight">
-                          {item.fromlocation} {item.tolocation ? `→ ${item.tolocation}` : ''}
-                        </p>
-                        {item.itemremark && (
-                          <div className="text-[9px] mt-2 p-1.5 bg-white/60 border border-dashed border-[#141414]/10 rounded font-serif italic text-slate-600">
-                             {item.itemremark}
+
+              {/* Itemized Items */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between border-b-2 border-[#141414] pb-1">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#141414]">
+                    Itemized Breakdown ({group.length} {group.length === 1 ? 'item' : 'items'})
+                  </span>
+                  <div className="bg-[#141414] text-white text-xs px-2.5 py-0.5 rounded font-black">
+                    Grand Total: ₹{claim.grandtotal}
+                  </div>
+                </div>
+                
+                <div className="max-h-[350px] overflow-y-auto pr-2 space-y-3 custom-scrollbar">
+                  {group.map((item, idx) => (
+                    <div key={idx} className="bg-white border-2 border-[#141414] rounded-lg p-3 hover:bg-slate-50/50 transition-all shadow-[2px_2px_0px_rgba(20,20,20,1)] hover:translate-y-[-1px]">
+                      <div className="flex justify-between items-start gap-3">
+                        <div className="flex-1 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge className="text-[8px] font-bold uppercase bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0 rounded h-4">
+                              {item.expensecategory}
+                            </Badge>
+                            <span className="text-[9px] text-slate-500 font-mono">
+                              Date: {item.itemdate}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                      <div className="text-right ml-4">
-                        <div className="text-sm font-black text-blue-900 leading-none">₹{item.amount}</div>
-                        {item.attachmentlink && item.attachmentlink !== "Upload Failed" && (
-                          <a 
-                            href={item.attachmentlink} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            className="inline-flex items-center gap-1 text-[8px] font-black text-blue-600 hover:bg-blue-50 px-2 py-1 rounded border border-blue-200 mt-2 transition-colors uppercase"
-                          >
-                            <FileText className="w-2.5 h-2.5" /> View Bill
-                          </a>
-                        )}
+                          
+                          <div className="text-xs text-[#141414] font-bold flex items-center gap-1">
+                            <span className="text-blue-700">Route:</span>
+                            <span>{item.fromlocation} {item.tolocation ? `→ ${item.tolocation}` : '(Local)'}</span>
+                          </div>
+
+                          {item.itemremark && (
+                            <div className="text-[10px] p-2 bg-slate-50 border border-dashed border-slate-200 rounded font-serif italic text-slate-600">
+                              "{item.itemremark}"
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="text-right flex flex-col items-end justify-between self-stretch shrink-0">
+                          <div className="text-sm font-black text-blue-950 font-mono bg-blue-50/70 border border-blue-100 rounded px-2 py-0.5">
+                            ₹{item.amount}
+                          </div>
+                          {item.attachmentlink && item.attachmentlink !== "Upload Failed" && (
+                            <a 
+                              href={item.attachmentlink} 
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              className="inline-flex items-center gap-1 text-[8px] font-black text-blue-600 hover:text-white bg-blue-50 hover:bg-blue-600 px-2 h-6 rounded-md border-2 border-blue-600 transition-colors uppercase mt-3"
+                            >
+                              <FileText className="w-2.5 h-2.5" /> View Bill
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
 
-            <div className="space-y-4">
-              {/* SENDER PROFILE BOX */}
-              <div className="bg-blue-50 border-2 border-blue-200 p-4 rounded-xl space-y-4 shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-24 h-24 bg-blue-100/30 rounded-full -mr-12 -mt-12 blur-2xl" />
-                <div className="flex items-center justify-between border-b border-blue-100 pb-3 relative z-10">
-                   <div className="flex items-center gap-2">
-                     <div className="bg-blue-600 p-2 rounded-lg shadow-[2px_2px_0px_rgba(20,20,20,0.2)]">
-                       <ShieldCheck className="w-5 h-5 text-white" />
-                     </div>
-                     <div>
-                       <p className="text-[10px] font-black uppercase text-blue-900 leading-none tracking-tight">Active Identity</p>
-                       <p className="text-[8px] text-blue-600 font-bold uppercase tracking-widest mt-0.5">Admin Session</p>
-                     </div>
-                   </div>
-                   <div className="text-right">
-                     <p className="text-[12px] font-black text-blue-900 uppercase tracking-tight">{adminName}</p>
-                     <p className="text-[9px] text-blue-700 font-mono italic opacity-70">{adminEmail}</p>
-                   </div>
+            {/* Right Column: Interactive admin actions */}
+            <div className="lg:col-span-5 space-y-4">
+              {/* Mail target recipient Profile Card */}
+              <div className="bg-blue-50/80 border-2 border-blue-200 p-4 rounded-xl space-y-3 relative overflow-hidden">
+                <div className="flex items-center justify-between border-b border-blue-200/50 pb-2">
+                  <span className="text-[9px] font-black uppercase text-blue-900 tracking-wider">Mail Output Routing</span>
+                  <Badge className="bg-blue-600 text-white text-[7px] font-bold uppercase tracking-widest px-1.5 py-0 h-4">Verified</Badge>
                 </div>
                 
-                <div className="space-y-3 relative z-10">
-                   <div className="flex items-center justify-between">
-                     <Label className="text-[10px] font-black uppercase text-blue-800/60">Target Recipient</Label>
-                     <span className="bg-blue-600 text-white text-[7px] px-1.5 py-0.5 rounded font-black italic">AUTO-SYNCED</span>
-                   </div>
-                   <div className="relative group">
-                     <Mail className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-blue-400 group-focus-within:text-blue-600 transition-colors" />
-                     <Input 
-                       value={email} 
-                       onChange={e => setEmail(e.target.value)} 
-                       className="h-10 text-xs pl-8 border-blue-100 bg-white font-bold text-blue-900 focus:ring-4 focus:ring-blue-100 transition-all border-2" 
-                     />
-                   </div>
-                   <div className="bg-white/60 p-3 rounded-lg border-2 border-dashed border-blue-200 text-[9px] text-blue-700 leading-relaxed">
-                     <div className="flex items-start gap-2">
-                       <Info className="w-3 h-3 mt-0.5 shrink-0" />
-                       <p>Mails deploy via SMTP protocol. Visual header will display <b>"{adminName}"</b>. Reply-to routing points to <b>{adminEmail}</b>.</p>
-                     </div>
-                   </div>
+                <div className="space-y-2.5">
+                  <Label className="text-[10px] font-bold uppercase text-blue-900/80 block">Recipient (Claim Holder Email)</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-3 h-3.5 w-3.5 text-blue-500" />
+                    <Input 
+                      value={email} 
+                      onChange={e => setEmail(e.target.value)} 
+                      className="h-9 text-xs pl-8 border-blue-200 bg-white font-bold text-blue-950 focus:border-blue-500 transition-all border-2" 
+                    />
+                  </div>
+                  <div className="bg-white/70 p-2.5 rounded border border-dashed border-blue-200 text-[9px] text-blue-700 leading-relaxed">
+                    <p>SYSTEM ACTION: Admin updates triggers automatic SMTP emails using the claimant email <b>{email || 'None'}</b> to inform claimant.</p>
+                  </div>
                 </div>
               </div>
 
-              {/* REMARK BOX */}
+              {/* Remark Area */}
               <div className="bg-slate-50 border-2 border-[#141414] p-4 rounded-xl space-y-3 shadow-[4px_4px_0px_rgba(20,20,20,0.05)]">
-                <div className="flex items-center gap-2 border-b border-[#141414]/10 pb-2">
-                  <div className="bg-[#141414] p-1.5 rounded text-white italic font-serif text-[10px] lowercase">"txt"</div>
-                  <Label className="text-[10px] font-black uppercase text-[#141414]">Administrative Communication</Label>
+                <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                  <span className="bg-[#141414] text-white px-1.5 py-0.5 rounded font-mono text-[8px] font-bold">REMARK</span>
+                  <Label className="text-[10px] font-black uppercase text-[#141414] tracking-wider">Official Query / Comments</Label>
                 </div>
                 <Textarea 
-                  placeholder="Enter official remark or feedback for the claimant..." 
+                  placeholder="Type an official administrative query or feedback for the claimant..." 
                   value={remark} 
                   onChange={e => setRemark(e.target.value)}
-                  className="border-slate-200 min-h-[90px] text-xs resize-none bg-white focus:border-[#141414] transition-all"
+                  className="border-slate-300 min-h-[90px] text-xs resize-none bg-white focus:border-[#141414] transition-all"
                 />
                 <Button 
-                  className="w-full bg-[#141414] hover:bg-blue-600 text-white text-[10px] h-9 font-black uppercase tracking-widest shadow-[4px_4px_0px_0px_rgba(20,20,20,0.1)] active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                  className="w-full bg-[#141414] hover:bg-blue-600 text-white text-[10px] h-9 font-black uppercase tracking-widest shadow-[4px_4px_0px_0px_rgba(20,20,20,0.15)] active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
                   disabled={!remark || !email}
                   onClick={() => onAction('REMARK', getActionData())}
                 >
-                  <Send className="w-3 h-3 mr-2" /> Dispatch Remark
+                  <Send className="w-3 h-3 mr-2" /> Dispatch Remark Email
                 </Button>
               </div>
             </div>
 
-            {/* ACTION SECTION IN A PROPER BOX */}
+            {/* Action sequence Controls */}
             <div className="col-span-full mt-2">
-              <div className="bg-white border-4 border-[#141414] rounded-2xl p-5 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)] relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-3">
-                  <Badge className="bg-slate-100 text-slate-400 font-mono text-[7px] border-none shadow-none uppercase">Sequence Controls</Badge>
+              <div className="bg-white border-3 border-[#141414] rounded-2xl p-5 shadow-[6px_6px_0px_0px_rgba(20,20,20,1)]">
+                <div className="flex items-center justify-between border-b pb-3 mb-4">
+                  <h3 className="text-xs font-black uppercase tracking-wider flex items-center gap-2 text-[#141414]">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse" />
+                    Expense Processing Control block
+                  </h3>
+                  <Badge variant="outline" className="border-slate-300 font-mono text-[8px] px-2 uppercase">Seq-State-Sync</Badge>
                 </div>
-                <h3 className="text-[12px] font-black uppercase tracking-tighter mb-4 flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-                  Administrator Control Center
-                </h3>
 
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                   <Button 
                     variant="outline" 
-                    className={`flex-col h-auto py-5 border-2 border-[#141414] transition-all group ${
+                    className={`flex-col h-auto py-4 border-2 border-[#141414] transition-all group ${
                       claim.approved === 'Yes' 
                         ? 'bg-slate-100 opacity-50 grayscale cursor-not-allowed' 
-                        : 'bg-green-50 hover:bg-green-100 shadow-[4px_4px_0px_0px_rgba(22,163,74,1)] active:shadow-none hover:-translate-y-1'
+                        : 'bg-green-50 hover:bg-green-100 shadow-[4px_4px_0px_0px_rgba(22,163,74,1)] active:shadow-none hover:-translate-y-0.5'
                     }`}
                     onClick={() => onAction('APPROVE', getActionData())}
                     disabled={claim.approved === 'Yes'}
                   >
-                    <ShieldCheck className={`w-8 h-8 mb-2 ${claim.approved === 'Yes' ? 'text-slate-400' : 'text-green-600 group-hover:scale-110 transition-transform'}`} />
-                    <span className="text-[10px] font-black uppercase text-center leading-tight">01. Admin<br/>Approve</span>
+                    <ShieldCheck className={`w-7 h-7 mb-1 ${claim.approved === 'Yes' ? 'text-slate-400' : 'text-green-600 group-hover:scale-105 transition-transform'}`} />
+                    <span className="text-[9px] font-black uppercase text-center leading-tight">Step 01<br/>Approve Claim</span>
                   </Button>
 
                   <Button 
                     variant="outline" 
-                    className={`flex-col h-auto py-5 border-2 border-[#141414] transition-all group ${
+                    className={`flex-col h-auto py-4 border-2 border-[#141414] transition-all group ${
                       claim.approved !== 'Yes' || claim.paymentprocess === 'Yes'
                         ? 'bg-slate-100 opacity-50 grayscale cursor-not-allowed' 
-                        : 'bg-blue-50 hover:bg-blue-100 shadow-[4px_4px_0px_0px_rgba(37,99,235,1)] active:shadow-none hover:-translate-y-1'
+                        : 'bg-blue-50 hover:bg-blue-100 shadow-[4px_4px_0px_0px_rgba(37,99,235,1)] active:shadow-none hover:-translate-y-0.5'
                     }`}
                     onClick={() => onAction('PROCESS', getActionData())}
                     disabled={claim.approved !== 'Yes' || claim.paymentprocess === 'Yes'}
                   >
-                    <CreditCard className={`w-8 h-8 mb-2 ${claim.approved !== 'Yes' || claim.paymentprocess === 'Yes' ? 'text-slate-400' : 'text-blue-600 group-hover:scale-110 transition-transform'}`} />
-                    <span className="text-[10px] font-black uppercase text-center leading-tight">02. Process<br/>Payment</span>
+                    <CreditCard className={`w-7 h-7 mb-1 ${claim.approved !== 'Yes' || claim.paymentprocess === 'Yes' ? 'text-slate-400' : 'text-blue-600 group-hover:scale-105 transition-transform'}`} />
+                    <span className="text-[9px] font-black uppercase text-center leading-tight">Step 02<br/>Process Payment</span>
                   </Button>
 
                   <Button 
                     variant="outline" 
-                    className={`flex-col h-auto py-5 border-2 border-[#141414] transition-all group ${
+                    className={`flex-col h-auto py-4 border-2 border-[#141414] transition-all group ${
                       claim.paymentprocess !== 'Yes' || claim.paymentrelease === 'Yes'
                         ? 'bg-slate-100 opacity-50 grayscale cursor-not-allowed' 
-                        : 'bg-purple-50 hover:bg-purple-100 shadow-[4px_4px_0px_0px_rgba(147,51,234,1)] active:shadow-none hover:-translate-y-1'
+                        : 'bg-purple-50 hover:bg-purple-100 shadow-[4px_4px_0px_0px_rgba(147,51,234,1)] active:shadow-none hover:-translate-y-0.5'
                     }`}
                     onClick={() => onAction('RELEASE', getActionData())}
                     disabled={claim.paymentprocess !== 'Yes' || claim.paymentrelease === 'Yes'}
                   >
-                    <CheckCircle2 className={`w-8 h-8 mb-2 ${claim.paymentprocess !== 'Yes' || claim.paymentrelease === 'Yes' ? 'text-slate-400' : 'text-purple-600 group-hover:scale-110 transition-transform'}`} />
-                    <span className="text-[10px] font-black uppercase text-center leading-tight">03. Final<br/>Release</span>
+                    <CheckCircle2 className={`w-7 h-7 mb-1 ${claim.paymentprocess !== 'Yes' || claim.paymentrelease === 'Yes' ? 'text-slate-400' : 'text-purple-600 group-hover:scale-105 transition-transform'}`} />
+                    <span className="text-[9px] font-black uppercase text-center leading-tight">Step 03<br/>Final Release</span>
                   </Button>
                   
-                  <div className="flex flex-col justify-center items-center p-4 bg-slate-900 text-white rounded-xl border-4 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,0.4)]">
-                    <span className="text-[8px] font-black opacity-50 uppercase tracking-[0.2em] mb-1">Current State</span>
-                    <div className="flex items-center gap-2">
-                       {claim.paymentrelease === 'Yes' && <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
-                       <span className="text-[14px] font-black uppercase tracking-tighter">
+                  <div className="flex flex-col justify-center items-center py-4 px-4 bg-slate-900 text-white rounded-xl border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,0.3)]">
+                    <span className="text-[8px] font-bold opacity-50 uppercase tracking-[0.15em] mb-1">Status State</span>
+                    <div className="flex items-center gap-1.5">
+                       <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                       <span className="text-xs font-black uppercase tracking-tight font-mono">
                         {claim.paymentrelease === 'Yes' ? 'Settled' : 
                          claim.paymentprocess === 'Yes' ? 'Processed' :
                          claim.approved === 'Yes' ? 'Approved' : 'Pending'}
                       </span>
                     </div>
-                    <p className="text-[7px] font-mono mt-2 opacity-40 uppercase tracking-widest">
-                       Ref: {claim.submissionid?.slice(-8)}
-                    </p>
+                    {claim.approved === 'Yes' && (
+                      <p className="text-[7px] text-zinc-400 uppercase mt-1 text-center truncate select-none leading-none max-w-full font-mono">
+                        {claim.approvedtimestamp?.split(' - ')[0] || 'Approved'}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
