@@ -3,7 +3,38 @@ import path from "path";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import stream from "stream";
-import admin from "firebase-admin";
+import * as adminNamespace from "firebase-admin";
+import adminModule from "firebase-admin";
+
+const getAdminModule = () => {
+  if (adminModule && typeof adminModule === "object" && "initializeApp" in adminModule) {
+    return adminModule;
+  }
+  if (adminModule && (adminModule as any).default && typeof (adminModule as any).default === "object" && "initializeApp" in (adminModule as any).default) {
+    return (adminModule as any).default;
+  }
+  if (adminNamespace && typeof adminNamespace === "object" && "initializeApp" in adminNamespace) {
+    return adminNamespace;
+  }
+  if (adminNamespace && (adminNamespace as any).default && typeof (adminNamespace as any).default === "object" && "initializeApp" in (adminNamespace as any).default) {
+    return (adminNamespace as any).default;
+  }
+  return adminNamespace || adminModule;
+};
+
+const admin = getAdminModule();
+
+const getFirebaseServerTimestamp = () => {
+  try {
+    const fsNamespace = adminNamespace?.firestore || (admin as any)?.firestore;
+    if (fsNamespace && fsNamespace.FieldValue) {
+      return fsNamespace.FieldValue.serverTimestamp();
+    }
+  } catch (e) {
+    console.warn("Failed to get firestore FieldValue, loading local timestamp fallback:", e);
+  }
+  return new Date();
+};
 import fs from "fs";
 import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
@@ -73,7 +104,8 @@ try {
 
 // --- Firebase Admin Instance Proxy (Lazy Loaded to prevent module-load crashes on Vercel) ---
 const isFirestoreEnabled = () => {
-  if (admin.apps.length === 0) return false;
+  const apps = admin?.apps || adminNamespace?.apps || [];
+  if (apps.length === 0) return false;
   
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
   const privateKey = process.env.GOOGLE_PRIVATE_KEY?.trim();
@@ -126,7 +158,7 @@ const createMockFirestore = () => {
   } as any;
 };
 
-let firestoreInstance: admin.firestore.Firestore | null = null;
+let firestoreInstance: adminNamespace.firestore.Firestore | null = null;
 const getFirestoreInstance = () => {
   if (!firestoreInstance) {
     if (!isFirestoreEnabled()) {
@@ -144,7 +176,7 @@ const getFirestoreInstance = () => {
   return firestoreInstance;
 };
 
-const db = new Proxy({} as admin.firestore.Firestore, {
+const db = new Proxy({} as adminNamespace.firestore.Firestore, {
   get(target, prop) {
     // Return early for known inspection/prototype calls to prevent auto-initializing
     if (
@@ -350,6 +382,13 @@ const loadLocalJSON = (filePath: string, defaultVal: any) => {
     if (fs.existsSync(filePath)) {
       return JSON.parse(fs.readFileSync(filePath, "utf-8"));
     }
+    // Fallback: If DB_DIR is /tmp, look in the project root process.cwd() for the file
+    const baseName = path.basename(filePath);
+    const fallbackPath = path.join(process.cwd(), baseName);
+    if (fs.existsSync(fallbackPath)) {
+      console.log(`Loading fallback local database from project root: ${fallbackPath}`);
+      return JSON.parse(fs.readFileSync(fallbackPath, "utf-8"));
+    }
   } catch (err) {
     console.error(`Error loading local JSON from ${filePath}:`, err);
   }
@@ -371,6 +410,11 @@ const initialAdmins = loadLocalJSON(ADMINS_FILE, {
   "admin@expense.com": {
     name: "Default Admin",
     email: "admin@expense.com",
+    password: "admin123"
+  },
+  "mis.mumbai@ginzalimited.com": {
+    name: "Mumbai Admin",
+    email: "mis.mumbai@ginzalimited.com",
     password: "admin123"
   }
 });
@@ -600,14 +644,14 @@ app.post("/api/auth/register", async (req, res) => {
       console.warn("Supabase save skipped during register:", sbErr);
     }
 
-    // Store in Firestore (with safe try-catch so it doesn't fail if Firestore is off)
+        // Store in Firestore (with safe try-catch so it doesn't fail if Firestore is off)
     try {
-      if (admin.apps.length > 0) {
+      if (isFirestoreEnabled()) {
         await db.collection("admins").doc(lowerEmail).set({
           name,
           email: lowerEmail,
           password,
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          createdAt: getFirebaseServerTimestamp()
         });
       }
     } catch (fsErr) {
@@ -634,11 +678,18 @@ app.post("/api/auth/login", async (req, res) => {
     // 1. Check fallback memory
     let adminUser = fallbackAdmins.get(lowerEmail);
 
-    // Support flexible "admin" / "admin123" for the default admin
+    // Support flexible "admin" / "admin123" for default admins
     if (lowerEmail === "admin@expense.com" && (password === "admin" || password === "admin123")) {
       return res.json({
         success: true,
         user: { name: "Default Admin", email: "admin@expense.com" }
+      });
+    }
+
+    if (lowerEmail === "mis.mumbai@ginzalimited.com" && (password === "admin" || password === "admin123")) {
+      return res.json({
+        success: true,
+        user: { name: "Mumbai Admin", email: "mis.mumbai@ginzalimited.com" }
       });
     }
 
@@ -658,7 +709,7 @@ app.post("/api/auth/login", async (req, res) => {
     // 2. Check Firestore if memory doesn't have it (or to sync down)
     if (!adminUser) {
       try {
-        if (admin.apps.length > 0) {
+        if (isFirestoreEnabled()) {
           const doc = await db.collection("admins").doc(lowerEmail).get();
           if (doc.exists) {
             const data = doc.data();
@@ -775,7 +826,7 @@ app.post("/api/claim", async (req, res) => {
 
     // --- FIRESTORE SYNC (Safe Try-Catch) ---
     try {
-      if (admin.apps.length > 0) {
+      if (isFirestoreEnabled()) {
         const claimRef = db.collection('claims').doc(submissionId);
         await claimRef.set({
           submissionId,
@@ -784,7 +835,7 @@ app.post("/api/claim", async (req, res) => {
           employeeEmail: salespersonEmail,
           grandTotal: Number(grandTotal),
           status: 'PENDING',
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: getFirebaseServerTimestamp(),
           mailSent: false
         });
 
@@ -1102,7 +1153,7 @@ app.get("/api/claims", async (req, res) => {
       
       // 2. Try Firestore claims
       try {
-        if (admin.apps.length > 0) {
+        if (isFirestoreEnabled()) {
           const claimsSnapshot = await db.collection('claims').orderBy('createdAt', 'desc').limit(100).get();
           const dbClaims: any[] = [];
           
@@ -1240,9 +1291,9 @@ app.post("/api/admin/action", async (req, res) => {
 
     // --- 2. FIRESTORE UPDATE (Safe Try-Catch) ---
     try {
-      if (admin.apps.length > 0) {
+      if (isFirestoreEnabled()) {
         const updateData: any = {
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt: getFirebaseServerTimestamp()
         };
         if (action === "REMARK") {
           updateData.adminRemark = data.remark;
@@ -1250,16 +1301,16 @@ app.post("/api/admin/action", async (req, res) => {
           updateData.mailSent = true;
         } else if (action === "APPROVE") {
           updateData.status = "APPROVED";
-          updateData.approvedAt = admin.firestore.FieldValue.serverTimestamp();
+          updateData.approvedAt = getFirebaseServerTimestamp();
           updateData.approvedBy = `${adminName} (${adminEmail})`;
         } else if (action === "PROCESS") {
           updateData.status = "PROCESSED";
           updateData.processedBy = `${adminName} (${adminEmail})`;
-          updateData.processedAt = admin.firestore.FieldValue.serverTimestamp();
+          updateData.processedAt = getFirebaseServerTimestamp();
         } else if (action === "RELEASE") {
           updateData.status = "RELEASED";
           updateData.releasedBy = `${adminName} (${adminEmail})`;
-          updateData.releasedAt = admin.firestore.FieldValue.serverTimestamp();
+          updateData.releasedAt = getFirebaseServerTimestamp();
         }
         await db.collection('claims').doc(claimId).update(updateData);
         console.log(`Firestore synchronized for action ${action} on claim ${claimId}`);
