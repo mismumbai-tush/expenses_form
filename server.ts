@@ -113,6 +113,9 @@ const isFirestoreEnabled = () => {
   
   if (hasServiceAccount) return true;
   
+  // On Cloud Run (ambient GCP environment), metadata server calls are native, very fast, and authorized by default.
+  if (process.env.K_SERVICE) return true;
+  
   // If in production or on Vercel but missing service account credentials,
   // firebase-admin queries will block on GCP metadata servers (169.254.169.254) and timeout, causing 500s.
   if (process.env.VERCEL || process.env.NODE_ENV === "production") {

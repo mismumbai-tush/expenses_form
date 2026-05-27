@@ -28,7 +28,7 @@ export default function App() {
   const [loadingClaims, setLoadingClaims] = useState(false);
 
   // --- Form State ---
-  const [selectedBranch, setSelectedBranch] = useState<Branch>(BRANCHES[0]);
+  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
   const [selectedSalesperson, setSelectedSalesperson] = useState<Salesperson | 'custom'>('custom');
   
   // claimant info
@@ -52,7 +52,7 @@ export default function App() {
       origin: '',
       destination: '',
       amount: '',
-      category: CATEGORIES[0],
+      category: '',
       claimDate: new Date().toISOString().split('T')[0],
       description: ''
     }
@@ -68,7 +68,7 @@ export default function App() {
         origin: '',
         destination: '',
         amount: '',
-        category: CATEGORIES[0],
+        category: '',
         claimDate: new Date().toISOString().split('T')[0],
         description: ''
       }
@@ -200,6 +200,10 @@ export default function App() {
   // Submit Claim
   const handleSubmitClaim = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedBranch) {
+      setFormStatus({ type: 'error', message: 'Please select a Target Office Branch.' });
+      return;
+    }
     if (!claimantName || !claimantEmail) {
       setFormStatus({ type: 'error', message: 'Please complete all required fields.' });
       return;
@@ -208,13 +212,17 @@ export default function App() {
     // Validate all expense lines
     for (let i = 0; i < expenseLines.length; i++) {
       const line = expenseLines[i];
+      if (!line.category || line.category === '') {
+        setFormStatus({ type: 'error', message: `Please select a Category for Item #${i + 1}.` });
+        return;
+      }
       if (line.category === 'Travel') {
-        if (!line.origin || !line.destination || !line.amount || !line.category || !line.claimDate) {
+        if (!line.origin || !line.destination || !line.amount || !line.claimDate) {
           setFormStatus({ type: 'error', message: `Please complete Origin (From) and Destination (To) fields for Item #${i + 1}.` });
           return;
         }
       } else {
-        if (!line.title || !line.amount || !line.category || !line.claimDate) {
+        if (!line.title || !line.amount || !line.claimDate) {
           setFormStatus({ type: 'error', message: `Please complete all required fields for Item #${i + 1}.` });
           return;
         }
@@ -276,7 +284,7 @@ export default function App() {
           origin: '',
           destination: '',
           amount: '',
-          category: CATEGORIES[0],
+          category: '',
           claimDate: new Date().toISOString().split('T')[0],
           description: ''
         }
@@ -454,19 +462,24 @@ export default function App() {
                   
                   {/* Select Branch Input */}
                   <div className="mb-5">
-                    <label className="block text-xs font-medium text-slate-500 mb-2">Target Office Branch</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-2">Target Office Branch <span className="text-rose-500">*</span></label>
                     <select 
                       id="branch_select"
-                      value={selectedBranch.name} 
+                      required
+                      value={selectedBranch ? selectedBranch.name : ""} 
                       onChange={(e) => {
                         const br = BRANCHES.find(b => b.name === e.target.value);
                         if (br) {
                           setSelectedBranch(br);
                           setSelectedSalesperson('custom');
+                        } else {
+                          setSelectedBranch(null);
+                          setSelectedSalesperson('custom');
                         }
                       }}
-                      className="w-full bg-slate-50 border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full bg-slate-50 border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                     >
+                      <option value="">-- Select Branch --</option>
                       {BRANCHES.map(b => (
                         <option key={b.name} value={b.name}>{b.name} Branch</option>
                       ))}
@@ -474,20 +487,26 @@ export default function App() {
                   </div>
 
                   <div className="space-y-4 pt-2">
-                    <div className="bg-blue-50 bg-opacity-50 rounded-lg p-4 border border-blue-100">
-                      <p className="text-xs uppercase tracking-wider font-semibold text-blue-600 mb-2">Branch Head</p>
-                      <h4 className="text-sm font-bold text-slate-800">{selectedBranch.headName}</h4>
-                      <div className="space-y-1.5 mt-3 text-xs text-slate-600">
-                        <p className="flex items-center gap-2">
-                          <Mail className="h-3.5 w-3.5 text-slate-400" />
-                          {selectedBranch.headEmail}
-                        </p>
-                        <p className="flex items-center gap-2">
-                          <Phone className="h-3.5 w-3.5 text-slate-400" />
-                          +91 {selectedBranch.headPhone}
-                        </p>
+                    {selectedBranch ? (
+                      <div className="bg-blue-50 bg-opacity-50 rounded-lg p-4 border border-blue-100">
+                        <p className="text-[10px] uppercase tracking-wider font-bold text-blue-600 mb-2">Branch Head</p>
+                        <h4 className="text-sm font-bold text-slate-800">{selectedBranch.headName}</h4>
+                        <div className="space-y-1.5 mt-3 text-xs text-slate-600">
+                          <p className="flex items-center gap-2">
+                            <Mail className="h-3.5 w-3.5 text-slate-400" />
+                            {selectedBranch.headEmail}
+                          </p>
+                          <p className="flex items-center gap-2">
+                            <Phone className="h-3.5 w-3.5 text-slate-400" />
+                            +91 {selectedBranch.headPhone}
+                          </p>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="bg-slate-50 rounded-lg p-4 border border-slate-150 text-center">
+                        <p className="text-xs text-slate-500 italic">Please select a Target Office Branch to view the assigned Branch Head and details.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -536,16 +555,26 @@ export default function App() {
                           if (val === 'custom') {
                             setSelectedSalesperson('custom');
                           } else {
-                            const found = selectedBranch.salespeople.find(s => s.email === val);
-                            if (found) setSelectedSalesperson(found);
+                            if (selectedBranch) {
+                              const found = selectedBranch.salespeople.find(s => s.email === val);
+                              if (found) setSelectedSalesperson(found);
+                            }
                           }
                         }}
-                        className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={!selectedBranch}
+                        className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                       >
-                        {selectedBranch.salespeople.map(s => (
-                          <option key={s.email} value={s.email}>{s.name} ({s.email})</option>
-                        ))}
-                        <option value="custom">-- Custom Claimant (Specify Details) --</option>
+                        {selectedBranch ? (
+                          <>
+                            <option value="custom">-- Select Claimant --</option>
+                            {selectedBranch.salespeople.map(s => (
+                              <option key={s.email} value={s.email}>{s.name} ({s.email})</option>
+                            ))}
+                            <option value="custom">-- Custom Claimant (Specify Details) --</option>
+                          </>
+                        ) : (
+                          <option value="custom">-- Select Branch First --</option>
+                        )}
                       </select>
                     </div>
 
@@ -620,6 +649,7 @@ export default function App() {
                               onChange={(e) => handleUpdateLine(line.id, 'category', e.target.value)}
                               className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                             >
+                              <option value="">-- Select Category --</option>
                               {CATEGORIES.map(cat => (
                                 <option key={cat} value={cat}>{cat}</option>
                               ))}
