@@ -605,13 +605,15 @@ const sendMail = async (to: string, cc: string, subject: string, text: string, f
     // but the actual 'from' address must remain the authenticated SMTP_USER to avoid spam filters/refusal
     const displayName = fromName ? `${fromName}${replyTo ? ` (${replyTo})` : ''}` : (process.env.SMTP_USER_NAME || 'Expense System');
     
+    const isHtml = text.trim().startsWith("<") || text.includes("<table") || text.includes("<div");
     await transporter.sendMail({
       from: `"${displayName}" <${process.env.SMTP_USER}>`,
       replyTo: replyTo || process.env.SMTP_USER,
       to,
       cc,
       subject,
-      text,
+      text: isHtml ? text.replace(/<[^>]*>/g, '') : text,
+      html: isHtml ? text : undefined,
     });
     console.log(`Email sent to ${to} (CC: ${cc})`);
   } catch (error) {
@@ -1061,6 +1063,33 @@ app.get("/api/diagnose", async (req, res) => {
 
 // 2. Get Claims for Admin
 app.get("/api/claims", async (req, res) => {
+  const sendMappedClaims = (rawClaims: any[]) => {
+    const mapped = (rawClaims || []).map(item => ({
+      id: item.submissionid || item.id || `CLM-${Date.now()}`,
+      claimDate: item.itemdate || item.claimDate || "",
+      submitDate: item.timestamp || item.submitDate || "",
+      claimantName: item.salespersonname || item.claimantName || "",
+      claimantEmail: item.employeeemail || item.claimantEmail || item.salesperson_email || "",
+      title: item.itemremark || item.title || "Expense Claim",
+      amount: Number(item.amount) || Number(item.grandtotal) || 0,
+      category: item.expensecategory || item.category || "Other Expenses",
+      branch: item.branchname || item.branch || "",
+      description: item.itemremark || item.description || "",
+      attachmentUrl: item.attachmentlink || item.attachmentUrl || "",
+      status: item.status || "Pending",
+      remarks: item.adminremark || item.remarks || "",
+      rowIndex: item.rowIndex || 2,
+      sheetName: item.sheetName || item.branchname || item.branch || "Sheet1",
+      approved: item.approved || "No",
+      approvedDetails: item.approveddetails || item.approvedtimestamp || "",
+      paymentProcess: item.paymentprocess || "No",
+      processedBy: item.processedby || "",
+      paymentRelease: item.paymentrelease || "No",
+      releasedBy: item.releasedby || ""
+    }));
+    return res.json({ success: true, claims: mapped });
+  };
+
   try {
     // 1. Try Google Sheets first
     try {
@@ -1128,7 +1157,7 @@ app.get("/api/claims", async (req, res) => {
         }
       });
 
-      return res.json(mergedClaims);
+      return sendMappedClaims(mergedClaims);
     } catch (sheetError: any) {
       console.warn("Google Sheets fetch failed, falling back to database/memory storage:", sheetError.message);
       
@@ -1144,7 +1173,7 @@ app.get("/api/claims", async (req, res) => {
                 mergedClaims.push(fc);
               }
             });
-            return res.json(mergedClaims);
+            return sendMappedClaims(mergedClaims);
           }
         }
       } catch (sbClaimsErr: any) {
@@ -1237,7 +1266,7 @@ app.get("/api/claims", async (req, res) => {
                 mergedClaims.push(fc);
               }
             });
-            return res.json(mergedClaims);
+            return sendMappedClaims(mergedClaims);
           }
         }
       } catch (firestoreError) {
@@ -1245,11 +1274,597 @@ app.get("/api/claims", async (req, res) => {
       }
 
       // 3. Complete fallback back to in-memory array
-      res.json(fallbackClaims);
+      return sendMappedClaims(fallbackClaims);
     }
   } catch (error: any) {
     console.error("Critical Admin Fetch Error:", error);
-    res.json([]); // Return empty list instead of 500 error to ensure UI can still load smoothly
+    return res.json({ success: true, claims: [] });
+  }
+});
+
+// 2b. Submit Simple Claim (Flat claimant schema from client-side App.tsx)
+app.post("/api/claims", async (req, res) => {
+  try {
+    const {
+      claimDate,
+      claimantName,
+      claimantEmail,
+      title,
+      amount,
+      category,
+      branch,
+      description,
+      fileBase64,
+      fileName,
+      branchHeadEmail
+    } = req.body;
+
+    const submissionId = 'CLM-' + Math.floor(100000 + Math.random() * 900000);
+    const timestamp = new Date().toLocaleString();
+
+    let driveClient: any = null;
+    try {
+      driveClient = await getDriveClient();
+    } catch (e: any) {
+      console.warn("Google Drive not available for flat submit:", e.message);
+    }
+
+    let attachmentUrl = "";
+    if (fileBase64 && fileName && driveClient) {
+      try {
+        attachmentUrl = await uploadToDrive(
+          `${submissionId}_${fileName}`,
+          fileBase64,
+          "application/octet-stream"
+        ) || "";
+      } catch (uploadError) {
+        console.error("Flat upload to Drive failed:", uploadError);
+        attachmentUrl = "Upload Failed (Google Drive Error)";
+      }
+    } else if (fileBase64 && fileName) {
+      attachmentUrl = "Attachment Loaded (Local Copy Only)";
+    }
+
+    const localRows = [{
+      rowIndex: 2,
+      sheetName: branch || "Sheet1",
+      timestamp,
+      submissionid: submissionId,
+      branchname: branch || "Sheet1",
+      salespersonname: claimantName,
+      expensecategory: category,
+      itemdate: claimDate,
+      fromlocation: "",
+      tolocation: "",
+      amount: String(amount),
+      attachmentlink: attachmentUrl,
+      itemremark: description || title,
+      grandtotal: String(amount),
+      adminremark: "",
+      mailsent: "No",
+      approved: "No",
+      approvedtimestamp: "",
+      paymentprocess: "No",
+      processedby: "",
+      status: "Pending",
+      paymentrelease: "No",
+      releasedby: "",
+      employeeemail: claimantEmail,
+      branchheademail: branchHeadEmail
+    }];
+
+    // Local file system backup
+    fallbackClaims.push(...localRows);
+    fallbackEmailMap[submissionId] = claimantEmail;
+    saveLocalJSON(CLAIMS_FILE, fallbackClaims);
+    saveLocalJSON(MAIL_MAP_FILE, fallbackEmailMap);
+
+    // Sync flat claim to Supabase if config is provided
+    try {
+      if (supabaseClient) {
+        await saveSupabaseClaims(localRows);
+      }
+    } catch (sbErr) {
+      console.error("Supabase Sync Error:", sbErr);
+    }
+
+    // Sync flat claim to Firestore
+    try {
+      if (isFirestoreEnabled()) {
+        const claimRef = db.collection('claims').doc(submissionId);
+        await claimRef.set({
+          submissionId,
+          branchName: branch || "Unknown",
+          salespersonName: claimantName || "Unknown",
+          employeeEmail: claimantEmail,
+          grandTotal: Number(amount),
+          status: 'PENDING',
+          createdAt: getFirebaseServerTimestamp(),
+          mailSent: false
+        });
+
+        const itemRef = claimRef.collection('items').doc(`item_0`);
+        await itemRef.set({
+          category,
+          itemDate: claimDate,
+          fromLoc: "",
+          toLoc: "",
+          amount: Number(amount),
+          attachmentLink: attachmentUrl,
+          remark: description || title
+        });
+      }
+    } catch (fsErr) {
+      console.error("Firestore Sync Error:", fsErr);
+    }
+
+    // Append raw Row to Google Sheet Branch
+    try {
+      const sheets = await getSheetsClient();
+      const sheetTitle = branch || "Sheet1";
+      await ensureSheetExists(sheets, SHEET_ID, sheetTitle);
+      await saveEmailMapping(sheets, SHEET_ID, submissionId, claimantEmail);
+
+      const rows = [[
+        timestamp,
+        submissionId,
+        branch || "",
+        claimantName || "",
+        category || "",
+        claimDate || "",
+        "", // from
+        "", // to
+        amount || "",
+        attachmentUrl || "",
+        description || title || "",
+        amount || 0,
+        "", // Admin Remark
+        "No", // Mail Sent
+        "No", // Approved
+        "", // Approved Timestamp
+        "No", // Payment Process
+        "", // Processed By
+        "Pending", // Status
+        "No", // Payment Release
+        ""  // Released By
+      ]];
+
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID,
+        range: `${sheetTitle}!A:U`,
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: rows },
+      });
+    } catch (sheetError: any) {
+      console.warn("Sheets Append Error:", sheetError.message);
+    }
+
+    // Email Dispatch
+    try {
+      const adminEmailsRaw = process.env.ADMIN_EMAILS || "mis.mumbai@ginzalimited.com";
+      const adminsList = adminEmailsRaw.split(",").map(e => e.trim()).filter(Boolean);
+      if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
+        adminsList.push("mis.mumbai@ginzalimited.com");
+      }
+      const adminEmails = adminsList.join(",");
+      const recipients = branchHeadEmail ? `${adminEmails},${branchHeadEmail}` : adminEmails;
+      
+      const emailSubject = `New Claim Submitted - ${claimantName} (${branch})`;
+      const emailBody = `Dear Admin,\n\nA new expense claim of ₹${amount} has been successfully submitted by ${claimantName}.\n\n--- Claimant Information ---\nName: ${claimantName}\nEmail: ${claimantEmail}\nBranch: ${branch}\nSubmission ID: ${submissionId}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
+
+      await sendMail(
+        recipients,
+        "",
+        emailSubject,
+        emailBody,
+        claimantName,
+        claimantEmail
+      );
+    } catch (mailErr) {
+      console.error("Safe notification skip on flat submit:", mailErr);
+    }
+
+    res.json({
+      success: true,
+      claim: {
+        id: submissionId,
+        claimDate,
+        submitDate: timestamp,
+        claimantName,
+        claimantEmail,
+        title,
+        amount: Number(amount) || 0,
+        category,
+        branch,
+        description,
+        attachmentUrl,
+        status: "Pending",
+        remarks: ""
+      }
+    });
+  } catch (error: any) {
+    console.error("Flat submit api failed:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 2c. Flat Claim approval activity action (Approve, Reject, Process, Release from client-side App.tsx)
+app.post("/api/claims/action", async (req, res) => {
+  try {
+    const { id, status, remarks, claimantEmail, title, amount, rowIndex: reqRowIndex, branchName: reqBranchName } = req.body;
+
+    const claim = fallbackClaims.find(c => c.submissionid === id);
+    const branchName = reqBranchName || (claim ? claim.branchname : "Sheet1");
+
+    // Dynamic row finder in Google Sheet
+    let rowIndex = reqRowIndex || (claim ? Number(claim.rowIndex) : 2);
+    try {
+      if (id) {
+        const sheets = await getSheetsClient();
+        const targetSheet = branchName || "Sheet1";
+        const sheetValuesResponse = await sheets.spreadsheets.values.get({
+          spreadsheetId: SHEET_ID,
+          range: `${targetSheet}!B:B`
+        });
+        const rows = sheetValuesResponse.data.values || [];
+        for (let idx = 0; idx < rows.length; idx++) {
+          if (rows[idx] && rows[idx][0] === id) {
+            rowIndex = idx + 1; // 1-indexed row number
+            console.log(`Dynamic row locator found submission ${id} at row ${rowIndex} in Google Sheet ${targetSheet}`);
+            break;
+          }
+        }
+      }
+    } catch (rowLocError) {
+      console.warn("Dynamic row locator failed:", rowLocError);
+    }
+
+    const adminName = "System Admin";
+    const adminEmail = "mis.mumbai@ginzalimited.com";
+    const timestamp = new Date().toLocaleString();
+
+    let action = "REMARK";
+    if (status === "Approved") action = "APPROVE";
+    else if (status === "Processed") action = "PROCESS";
+    else if (status === "Released") action = "RELEASE";
+    else if (status === "Rejected") action = "REMARK";
+
+    const mappedComment = action === "APPROVE" ? "Approved" : (remarks || status);
+
+    // Update in-memory local fallback array
+    fallbackClaims = fallbackClaims.map(c => {
+      if (c.submissionid === id) {
+        const updated = { ...c };
+        if (action === "REMARK") {
+          updated.adminremark = mappedComment;
+          updated.mailsent = "Yes";
+          updated.status = "Rejected";
+        } else if (action === "APPROVE") {
+          updated.approved = "Yes";
+          updated.approvedtimestamp = `${adminName} - ${timestamp}`;
+          updated.status = "Approved";
+        } else if (action === "PROCESS") {
+          updated.paymentprocess = "Yes";
+          updated.processedby = `${adminName} - ${timestamp}`;
+          updated.status = "Processed";
+        } else if (action === "RELEASE") {
+          updated.paymentrelease = "Yes";
+          updated.releasedby = `${adminName} - ${timestamp}`;
+          updated.status = "Released";
+        }
+        return updated;
+      }
+      return c;
+    });
+    saveLocalJSON(CLAIMS_FILE, fallbackClaims);
+
+    // Sync action state to Firestore
+    try {
+      if (isFirestoreEnabled()) {
+        const updateData: any = {
+          updatedAt: getFirebaseServerTimestamp()
+        };
+        if (action === "REMARK") {
+          updateData.adminRemark = mappedComment;
+          updateData.status = "REJECTED";
+          updateData.mailSent = true;
+        } else if (action === "APPROVE") {
+          updateData.status = "APPROVED";
+          updateData.approvedAt = getFirebaseServerTimestamp();
+          updateData.approvedBy = `${adminName} (${adminEmail})`;
+        } else if (action === "PROCESS") {
+          updateData.status = "PROCESSED";
+          updateData.processedBy = `${adminName} (${adminEmail})`;
+          updateData.processedAt = getFirebaseServerTimestamp();
+        } else if (action === "RELEASE") {
+          updateData.status = "RELEASED";
+          updateData.releasedBy = `${adminName} (${adminEmail})`;
+          updateData.releasedAt = getFirebaseServerTimestamp();
+        }
+        await db.collection('claims').doc(id).update(updateData);
+      }
+    } catch (fsErr) {
+      console.error("Firestore action sync error:", fsErr);
+    }
+
+    // Sync action state to Supabase
+    try {
+      if (supabaseClient) {
+        const updateFields: any = {};
+        if (action === "REMARK") {
+          updateFields.adminremark = mappedComment;
+          updateFields.mailsent = "Yes";
+          updateFields.status = "Rejected";
+        } else if (action === "APPROVE") {
+          updateFields.approved = "Yes";
+          updateFields.approvedtimestamp = `${adminName} - ${timestamp}`;
+          updateFields.status = "Approved";
+        } else if (action === "PROCESS") {
+          updateFields.paymentprocess = "Yes";
+          updateFields.processedby = `${adminName} - ${timestamp}`;
+          updateFields.status = "Processed";
+        } else if (action === "RELEASE") {
+          updateFields.paymentrelease = "Yes";
+          updateFields.releasedby = `${adminName} - ${timestamp}`;
+          updateFields.status = "Released";
+        }
+        await updateSupabaseClaim(id, updateFields);
+      }
+    } catch (sbErr) {
+      console.error("Supabase action sync error:", sbErr);
+    }
+
+    // Google Sheets live column edits
+    try {
+      const sheets = await getSheetsClient();
+      const targetSheet = branchName || "Sheet1";
+      if (action === "REMARK") {
+        const range = `${targetSheet}!M${rowIndex}:N${rowIndex}`;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: range,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [[mappedComment, "Yes"]] },
+        });
+
+        // Column S - Status state
+        const statusRange = `${targetSheet}!S${rowIndex}`;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: statusRange,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [["Rejected"]] },
+        });
+      } else if (action === "APPROVE") {
+        const range = `${targetSheet}!O${rowIndex}:P${rowIndex}`;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: range,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [["Yes", `${adminName} - ${timestamp}`]] },
+        });
+
+        // Column S - Status state
+        const statusRange = `${targetSheet}!S${rowIndex}`;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: statusRange,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [["Approved"]] },
+        });
+      } else if (action === "PROCESS") {
+        // Column Q (Payment Process), R (Processed By), S (Status Log)
+        const range = `${targetSheet}!Q${rowIndex}:S${rowIndex}`;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: range,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [["Yes", `${adminName} - ${timestamp}`, "Processed"]] },
+        });
+      } else if (action === "RELEASE") {
+        // Column T (Payment Release), U (Released By)
+        const range = `${targetSheet}!T${rowIndex}:U${rowIndex}`;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: range,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [["Yes", `${adminName} - ${timestamp}`]] },
+        });
+
+        // Column S - Status state
+        const statusRange = `${targetSheet}!S${rowIndex}`;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: statusRange,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [["Released"]] },
+        });
+      }
+    } catch (sheetError: any) {
+      console.warn("Sheets action edit bypassed:", sheetError.message);
+    }
+
+    // Mail alerts
+    try {
+      const targetClaimant = claimantEmail || "";
+      const bHeadEmail = claim ? claim.branchheademail : "";
+      
+      const adminEmailsStr = process.env.ADMIN_EMAILS || "mis.mumbai@ginzalimited.com";
+      const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(Boolean);
+      if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
+        adminsList.push("mis.mumbai@ginzalimited.com");
+      }
+      const adminEmails = adminsList.join(",");
+
+      // Resolve claim detail variables
+      const employeeName = claim ? (claim.salespersonname || claim.name || "Employee") : "Employee";
+      const employeeEmail = targetClaimant || (claim ? claim.employeeemail : "") || "employee@ginzalimited.com";
+      const claimBranch = branchName || (claim ? claim.branchname || claim.branch : "") || "Default";
+      const category = claim ? (claim.expensecategory || claim.category || "General") : "General";
+      const claimDate = claim ? (claim.itemdate || claim.date || "N/A") : "N/A";
+      const expenseTitle = claim ? (claim.itemremark || claim.remark || title || "Expense Claim") : (title || "Expense Claim");
+      const claimDescription = claim ? (claim.itemremark || claim.remark || "N/A") : "N/A";
+      const attachmentLink = claim ? (claim.attachmentlink || claim.attachment || "") : "";
+      const attachmentHtml = attachmentLink ? `<p style="margin-top: 15px;"><strong>Attachment Link:</strong> <a href="${attachmentLink}" style="color: #2563eb; text-decoration: underline;" target="_blank">View Claim Document/Receipt</a></p>` : "";
+
+      // Branch Emails Mapping
+      const BRANCH_EMAILS: Record<string, string> = {
+        "Ludhiana": "kavita.acharya@ginzalimited.com",
+        "Bangalore": "cash.udhna@ginzalimited.com",
+        "Surat": "cash.udhna@ginzalimited.com",
+        "Tirupur": "cash.udhna@ginzalimited.com"
+      };
+
+      const accountsMail = BRANCH_EMAILS[claimBranch] || process.env.ACCOUNTS_EMAIL || "patilyog345@gmail.com";
+
+      if (action === "REMARK") {
+        const mailBody = `Dear claimant,\n\nYour claims submission with ID: ${id} (₹${amount}) was Rejected / Remarked by Admin:\n\n"${mappedComment}"\n\nPlease check the portal to update your transactions logs.\n\nThank you,\nExpense Department`;
+        await sendMail(
+          targetClaimant,
+          `${adminEmails},${bHeadEmail}`,
+          `REJECTED: Expense Claim Update (${id})`,
+          mailBody,
+          adminName,
+          adminEmail
+        );
+      } else if (action === "APPROVE") {
+        const mailBody = `Dear claimant,\n\nYour claims submission with ID: ${id} of ₹${amount} was APPROVED successfully by Admin.\n\nApproved Date: ${timestamp}\n\nThank you,\nExpense Department`;
+        await sendMail(
+          targetClaimant,
+          `${adminEmails},${bHeadEmail}`,
+          `APPROVED: Expense Claim Update (${id})`,
+          mailBody,
+          adminName,
+          adminEmail
+        );
+      } else if (action === "PROCESS") {
+        const htmlBody = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+  <div style="background-color: #2563eb; color: white; padding: 20px; font-size: 18px; font-weight: bold; text-align: center;">
+    PAYMENT PROCESSING REQUEST
+  </div>
+  <div style="padding: 24px; color: #1e293b; line-height: 1.6;">
+    <p>Dear Accounts Team,</p>
+    <p>Please process and release the payment for the following approved claim as soon as possible.</p>
+    
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal; width: 40px;">Employee Name:</th>
+        <td style="text-align: left; padding: 8px 0; font-weight: bold; color: #0f172a;">${employeeName}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal;">Employee Email:</th>
+        <td style="text-align: left; padding: 8px 0; color: #0f172a;">${employeeEmail}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal;">Submitting Branch:</th>
+        <td style="text-align: left; padding: 8px 0; color: #0f172a;">${claimBranch}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal;">Claim Category:</th>
+        <td style="text-align: left; padding: 8px 0; color: #0f172a;">${category}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal;">Claim Date:</th>
+        <td style="text-align: left; padding: 8px 0; color: #0f172a;">${claimDate}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal;">Expense Details:</th>
+        <td style="text-align: left; padding: 8px 0; color: #0f172a;">${expenseTitle}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal;">Description / Remark:</th>
+        <td style="text-align: left; padding: 8px 0; color: #475569; font-style: italic;">${claimDescription}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal;">Submission ID:</th>
+        <td style="text-align: left; padding: 8px 0; font-family: monospace; color: #0f172a;">${id}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #cbd5e1; background-color: #f8fafc;">
+        <th style="text-align: left; padding: 12px 8px; color: #1e293b; font-weight: bold;">Net Reimbursement:</th>
+        <td style="text-align: left; padding: 12px 8px; font-size: 18px; font-weight: 800; color: #2563eb;">₹${Number(amount).toLocaleString('en-IN')}</td>
+      </tr>
+    </table>
+
+    ${attachmentHtml}
+
+    <div style="margin-top: 24px; padding: 12px; border-left: 4px solid #3b82f6; background-color: #f0f9ff; font-size: 13px; color: #1e40af;">
+      <strong>Actioned By:</strong> ${adminName}<br/>
+      <strong>Admin Status:</strong> Approved & forwarded to accounts for processing.<br/>
+      <strong>Date Authorized:</strong> ${timestamp}
+    </div>
+    
+    <p style="margin-top: 30px; font-size: 12px; color: #94a3b8; text-align: center; border-t: 1px solid #e2e8f0; padding-top: 15px;">
+      This is an automated request generated from the Ginza Industries Expense Claim System.
+    </p>
+  </div>
+</div>`;
+        await sendMail(
+          accountsMail,
+          `${employeeEmail},${bHeadEmail},${adminEmails}`,
+          `PAYMENT PROCESSING REQUEST: ${id}`,
+          htmlBody,
+          adminName,
+          adminEmail
+        );
+      } else if (action === "RELEASE") {
+        const htmlBody = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+  <div style="background-color: #10b981; color: white; padding: 20px; font-size: 18px; font-weight: bold; text-align: center;">
+    PAYMENT RELEASED SUCCESSFULLY 🎉
+  </div>
+  <div style="padding: 24px; color: #1e293b; line-height: 1.6;">
+    <p>Dear ${employeeName},</p>
+    <p>We are pleased to inform you that your expense reimbursement payment has been successfully released by the Accounts Department.</p>
+    
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal; width: 40%;">Submission ID:</th>
+        <td style="text-align: left; padding: 8px 0; font-family: monospace; color: #0f172a; font-weight: bold;">${id}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal;">Expense Title:</th>
+        <td style="text-align: left; padding: 8px 0; color: #0f172a;">${expenseTitle}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <th style="text-align: left; padding: 8px 0; color: #64748b; font-weight: normal;">Expense Category:</th>
+        <td style="text-align: left; padding: 8px 0; color: #0f172a;">${category}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #cbd5e1; background-color: #f0vdf4;">
+        <th style="text-align: left; padding: 12px 8px; color: #1e293b; font-weight: bold;">Amount Reimbursed:</th>
+        <td style="text-align: left; padding: 12px 8px; font-size: 18px; font-weight: 800; color: #059669;">₹${Number(amount).toLocaleString('en-IN')}</td>
+      </tr>
+    </table>
+
+    <div style="margin-top: 24px; padding: 12px; border-left: 4px solid #10b981; background-color: #f0fdf4; font-size: 13px; color: #065f46;">
+      <strong>Status:</strong> Released / Paid<br/>
+      <strong>Processed By:</strong> Systems Accounts Office (${adminName})<br/>
+      <strong>Date of Release:</strong> ${timestamp}
+    </div>
+    
+    <p style="margin-top: 30px; font-size: 12px; color: #94a3b8; text-align: center; border-t: 1px solid #e2e8f0; padding-top: 15px;">
+      Please check your registered bank account for the credit of the funds.<br/>
+      Thank you for your cooperation!
+    </p>
+  </div>
+</div>`;
+        await sendMail(
+          employeeEmail,
+          `${adminEmails},${bHeadEmail}`,
+          `PAYMENT RELEASED: ${id}`,
+          htmlBody,
+          adminName,
+          adminEmail
+        );
+      }
+    } catch (mailErr) {
+      console.error("Action email alert skipped:", mailErr);
+    }
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error("Flat Action Failed:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -1409,7 +2024,16 @@ app.post("/api/admin/action", async (req, res) => {
         adminsList.push("mis.mumbai@ginzalimited.com");
       }
       const adminEmails = adminsList.join(",");
-      const accountsMail = process.env.ACCOUNTS_EMAIL || "patilyog345@gmail.com";
+      
+      // Branch Emails Mapping
+      const BRANCH_EMAILS: Record<string, string> = {
+        "Ludhiana": "kavita.acharya@ginzalimited.com",
+        "Bangalore": "cash.udhna@ginzalimited.com",
+        "Surat": "cash.udhna@ginzalimited.com",
+        "Tirupur": "cash.udhna@ginzalimited.com"
+      };
+
+      const accountsMail = BRANCH_EMAILS[bName] || process.env.ACCOUNTS_EMAIL || "patilyog345@gmail.com";
 
       if (action === "REMARK") {
         await sendMail(

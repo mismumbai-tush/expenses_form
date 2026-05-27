@@ -1,1310 +1,1347 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useEffect, useRef } from 'react';
+import { BRANCHES, CATEGORIES } from './constants';
+import { Claim, Salesperson, Branch } from './types';
 import { 
-  Send, 
+  Building2, 
+  User, 
+  Mail, 
+  Phone, 
   FileText, 
-  CheckCircle2, 
-  Clock, 
-  AlertCircle, 
-  Menu, 
-  ChevronRight,
+  FileCheck, 
+  CheckCircle, 
+  XCircle, 
+  Search, 
+  RefreshCw, 
+  Sparkles, 
+  Upload, 
+  Lock, 
   LogOut,
-  Mail,
-  IndianRupee,
-  ShieldCheck,
-  CreditCard,
-  Check,
-  Info,
-  MapPin,
-  LogIn,
-  Plus,
-  SendHorizontal
+  AlertCircle,
+  Send,
+  Check
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Toaster, toast } from 'sonner';
-import { BRANCH_DATA, Branch, Salesperson } from './constants';
-
-// --- Types ---
-const BRANCHES = BRANCH_DATA.map(b => b.name);
-
-interface Claim {
-  rowIndex: number;
-  sheetName?: string;
-  timestamp: string;
-  submissionid: string;
-  branchname: string;
-  salespersonname: string;
-  expensecategory: string;
-  itemdate: string;
-  fromlocation: string;
-  tolocation: string;
-  amount: string;
-  attachmentlink: string;
-  itemremark: string;
-  grandtotal: string;
-  adminremark: string;
-  mailsent: string;
-  approved: string;
-  approvedtimestamp: string;
-  paymentprocess: string;
-  processedby: string;
-  status: string;
-  paymentrelease: string;
-  releasedby: string;
-  employeeemail?: string;
-  branchheademail?: string;
-}
+import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('submit');
-  const [user, setUser] = useState<{ displayName: string; email: string } | null>(() => {
-    try {
-      const saved = localStorage.getItem('custom_admin_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [activeTab, setActiveTab] = useState<'raise' | 'admin'>('raise');
   const [claims, setClaims] = useState<Claim[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loadingClaims, setLoadingClaims] = useState(false);
 
-  // Authentication custom states
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [registerName, setRegisterName] = useState('');
-  const [registerEmail, setRegisterEmail] = useState('');
-  const [registerPassword, setRegisterPassword] = useState('');
-  const [authTab, setAuthTab] = useState('login');
-
-  const handleCustomLogin = async () => {
-    if (!loginEmail || !loginPassword) {
-      toast.error("Email and password are required.");
-      return;
-    }
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Authentication failed.");
-      }
-      const adminProfile = { displayName: data.user.name, email: data.user.email };
-      localStorage.setItem('custom_admin_user', JSON.stringify(adminProfile));
-      setUser(adminProfile);
-      toast.success(`Logged in successfully as ${data.user.name}!`);
-      setLoginEmail('');
-      setLoginPassword('');
-    } catch (err: any) {
-      console.error("Login Error:", err);
-      toast.error(err.message || "Invalid credentials.");
-    }
-  };
-
-  const handleCustomRegister = async () => {
-    if (!registerName || !registerEmail || !registerPassword) {
-      toast.error("All fields are required for registration.");
-      return;
-    }
-    try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: registerName, email: registerEmail, password: registerPassword })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Registration failed.");
-      }
-      toast.success("Account created successfully! Switching to Login tab.");
-      setLoginEmail(registerEmail);
-      setRegisterName('');
-      setRegisterEmail('');
-      setRegisterPassword('');
-      setAuthTab('login'); // Automatically switch to Login tab
-    } catch (err: any) {
-      console.error("Register Error:", err);
-      toast.error(err.message || "Registration failed.");
-    }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('custom_admin_user');
-    setUser(null);
-    toast.success("Logged out successfully.");
-  };
-  const [filters, setFilters] = useState({
-    branch: 'all',
-    status: 'all',
-    month: 'all',
-    year: '',
-    employeeSearch: ''
-  });
-
-  const filteredClaims = claims.filter(claim => {
-    const matchBranch = filters.branch === 'all' || claim.branchname === filters.branch;
-    const matchEmployee = !filters.employeeSearch || claim.salespersonname?.toLowerCase().includes(filters.employeeSearch.toLowerCase());
-    
-    let matchStatus = true;
-    if (filters.status === 'pending') matchStatus = claim.approved !== 'Yes';
-    else if (filters.status === 'approved') matchStatus = claim.approved === 'Yes' && claim.paymentrelease !== 'Yes';
-    else if (filters.status === 'released') matchStatus = claim.paymentrelease === 'Yes';
-
-    const matchMonth = filters.month === 'all' || claim.timestamp.includes(filters.month);
-    const matchYear = !filters.year || claim.timestamp.includes(filters.year);
-
-    return matchBranch && matchEmployee && matchStatus && matchMonth && matchYear;
-  });
-
-  // Group filtered claims by submission ID for the admin view
-  const filteredGroups = useMemo(() => {
-    const groups: { [key: string]: Claim[] } = {};
-    filteredClaims.forEach(claim => {
-      if (!groups[claim.submissionid]) {
-        groups[claim.submissionid] = [];
-      }
-      groups[claim.submissionid].push(claim);
-    });
-    // Sort by row index descending (latest first)
-    return Object.values(groups).sort((a, b) => {
-      const idxA = a[0].rowIndex;
-      const idxB = b[0].rowIndex;
-      return idxB - idxA;
-    });
-  }, [filteredClaims]);
-
-  // Form State
-  const [formData, setFormData] = useState({
-    branchName: '',
-    salespersonName: '',
-    salespersonEmail: '',
-  });
-
-  const [items, setItems] = useState([{
-    id: crypto.randomUUID(),
-    category: 'Food',
-    itemDate: '',
-    fromLoc: '',
-    toLoc: '',
-    amount: '',
-    attachment: '',
-    remark: ''
-  }]);
-
-  const addItem = () => {
-    setItems([...items, {
-      id: crypto.randomUUID(),
-      category: 'Food',
-      itemDate: '',
-      fromLoc: '',
-      toLoc: '',
+  // --- Form State ---
+  const [selectedBranch, setSelectedBranch] = useState<Branch>(BRANCHES[0]);
+  const [selectedSalesperson, setSelectedSalesperson] = useState<Salesperson | 'custom'>('custom');
+  
+  // claimant info
+  const [claimantName, setClaimantName] = useState('');
+  const [claimantEmail, setClaimantEmail] = useState('');
+  
+  // claim info - now supporting multiple lines
+  const [expenseLines, setExpenseLines] = useState<Array<{
+    id: string;
+    title: string;
+    origin?: string;
+    destination?: string;
+    amount: string;
+    category: string;
+    claimDate: string;
+    description: string;
+  }>>([
+    {
+      id: "line_1",
+      title: '',
+      origin: '',
+      destination: '',
       amount: '',
-      attachment: '',
-      remark: ''
-    }]);
-  };
-
-  const removeItem = (id: string) => {
-    if (items.length > 1) {
-      setItems(items.filter(item => item.id !== id));
+      category: CATEGORIES[0],
+      claimDate: new Date().toISOString().split('T')[0],
+      description: ''
     }
-  };
+  ]);
 
-  const updateItem = (id: string, field: string, value: any) => {
-    setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
-  };
-
-  const handleFileChange = async (id: string, file: File | null) => {
-    if (!file) return;
-
-    // 1. If it's an image, perform client-side canvas compression
-    if (file.type.startsWith('image/')) {
-      try {
-        const compressedBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.readAsDataURL(file);
-          reader.onload = (event) => {
-            const img = new Image();
-            img.src = event.target?.result as string;
-            img.onload = () => {
-              const canvas = document.createElement("canvas");
-              let width = img.width;
-              let height = img.height;
-              const maxWidth = 1200;
-              const maxHeight = 1200;
-
-              // Fit to maximum bounding box
-              if (width > height) {
-                if (width > maxWidth) {
-                  height = Math.round((height * maxWidth) / width);
-                  width = maxWidth;
-                }
-              } else {
-                if (height > maxHeight) {
-                  width = Math.round((width * maxHeight) / height);
-                  height = maxHeight;
-                }
-              }
-
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext("2d");
-              if (!ctx) {
-                resolve(event.target?.result as string); // fallback
-                return;
-              }
-
-              ctx.drawImage(img, 0, 0, width, height);
-              // Export as high-compression JPEG (0.65 quality is indistinguishable but highly compressed)
-              const dataUrl = canvas.toDataURL("image/jpeg", 0.65);
-              resolve(dataUrl);
-            };
-            img.onerror = (e) => reject(e);
-          };
-          reader.onerror = (e) => reject(e);
-        });
-
-        updateItem(id, 'fileData', compressedBase64);
-        updateItem(id, 'fileName', file.name.replace(/\.[^/.]+$/, "") + ".jpg"); // force extension to jpg
-        updateItem(id, 'fileType', "image/jpeg");
-        toast.success("Image auto-compressed successfully for lightning-fast submission!");
-      } catch (err) {
-        console.error("Compression error, falling back to raw upload:", err);
-        // Fallback to reading file normally
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          updateItem(id, 'fileData', e.target?.result as string);
-          updateItem(id, 'fileName', file.name);
-          updateItem(id, 'fileType', file.type);
-        };
-        reader.readAsDataURL(file);
+  // Handler to add a new line
+  const handleAddLine = () => {
+    setExpenseLines(prev => [
+      ...prev,
+      {
+        id: Math.random().toString(),
+        title: '',
+        origin: '',
+        destination: '',
+        amount: '',
+        category: CATEGORIES[0],
+        claimDate: new Date().toISOString().split('T')[0],
+        description: ''
       }
-    } else {
-      // 2. Non-image files (e.g. PDF). Enforce a strict 2.5MB limit to prevent Vercel 4.5MB request payload limit errors
-      if (file.size > 2.5 * 1024 * 1024) {
-        toast.error(`File size is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Please upload a PDF/Document smaller than 2.5MB.`);
-        return;
+    ]);
+  };
+
+  // Handler to remove a line
+  const handleRemoveLine = (id: string) => {
+    if (expenseLines.length <= 1) return;
+    setExpenseLines(prev => prev.filter(line => line.id !== id));
+  };
+
+  // Handler to update a field on a specific line
+  const handleUpdateLine = (id: string, field: string, value: string) => {
+    setExpenseLines(prev => prev.map(line => {
+      if (line.id === id) {
+        return { ...line, [field]: value };
       }
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        updateItem(id, 'fileData', e.target?.result as string);
-        updateItem(id, 'fileName', file.name);
-        updateItem(id, 'fileType', file.type);
-      };
-      reader.readAsDataURL(file);
-    }
+      return line;
+    }));
   };
+  
+  // attachment info
+  const [file, setFile] = useState<File | null>(null);
+  const [fileBase64, setFileBase64] = useState<string>('');
+  const [fileName, setFileName] = useState('');
+  const [dragging, setDragging] = useState(false);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const grandTotal = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+  // status notifications
+  const [formStatus, setFormStatus] = useState<{ type: 'idle' | 'submitting' | 'success' | 'error'; message: string }>({
+    type: 'idle',
+    message: ''
+  });
 
-  const selectedBranch = BRANCH_DATA.find(b => b.name === formData.branchName);
-  const salespeople = selectedBranch ? selectedBranch.salespeople : [];
+  // --- Admin State ---
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [adminLoggedInEmail, setAdminLoggedInEmail] = useState('');
+  const [adminEmailInput, setAdminEmailInput] = useState('');
+  const [adminEmailError, setAdminEmailError] = useState('');
+  
+  // Admin selected action states
+  const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
+  const [remarksState, setRemarksState] = useState('');
+  const [actionStatus, setActionStatus] = useState<{ type: 'idle' | 'updating' | 'success' | 'error'; message: string }>({
+    type: 'idle',
+    message: ''
+  });
 
-  const handleBranchChange = (branchName: string) => {
-    setFormData({
-      ...formData,
-      branchName,
-      salespersonName: '',
-      salespersonEmail: ''
-    });
-  };
+  // Admin filter states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [branchFilter, setBranchFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
 
-  const handleSalespersonChange = (name: string) => {
-    const sp = salespeople.find(s => s.name === name);
-    setFormData({
-      ...formData,
-      salespersonName: name,
-      salespersonEmail: sp ? sp.email : ''
-    });
-  };
-
-  const handleTabChange = (v: string) => {
-    setActiveTab(v);
-  };
-
+  // Fetch claims from Node.js backend proxy
   const fetchClaims = async () => {
+    setLoadingClaims(true);
     try {
-      const res = await fetch('/api/claims');
-      const clone = res.clone();
-      if (!res.ok) {
-        let text = "";
-        try {
-          // Attempt clone first to bypass any extension interference on original
-          text = await clone.text();
-        } catch {
-          try {
-            text = await res.text();
-          } catch {
-            text = "Error reading response body";
-          }
-        }
-        try {
-          const errData = JSON.parse(text);
-          toast.error(`Failed to load claims: ${errData.error || res.statusText}`);
-        } catch {
-          const cleanText = text.slice(0, 100);
-          toast.error(`Server Error (${res.status}): ${cleanText}... Please check /api/diagnose for diagnostics.`);
-        }
-        setClaims([]);
-        return;
+      const response = await fetch('/api/claims');
+      const data = await response.json();
+      if (data.success) {
+        // Sort claims by date descending
+        const sortedClaims = (data.claims || []).sort((a: Claim, b: Claim) => 
+          new Date(b.submitDate).getTime() - new Date(a.submitDate).getTime()
+        );
+        setClaims(sortedClaims);
       }
-      
-      let data;
-      try {
-        data = await res.json();
-      } catch {
-        try {
-          data = await clone.json();
-        } catch (e: any) {
-          throw new Error("Failed to parse JSON response: " + e.message);
-        }
-      }
-
-      if (Array.isArray(data)) {
-        setClaims(data);
-      } else {
-        console.error('API did not return an array:', data);
-        setClaims([]);
-      }
-    } catch (error: any) {
-      console.error(error);
-      toast.error(`Connection failed: ${error.message || error}`);
+    } catch (err: any) {
+      console.error("Failed to load claims:", err);
+    } finally {
+      setLoadingClaims(false);
     }
   };
 
   useEffect(() => {
-    if (activeTab === 'admin') {
-      fetchClaims();
-    }
-  }, [activeTab]);
+    fetchClaims();
+  }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Set claimant when salesperson profile changes
+  useEffect(() => {
+    if (selectedSalesperson === 'custom') {
+      setClaimantName('');
+      setClaimantEmail('');
+    } else {
+      setClaimantName(selectedSalesperson.name);
+      setClaimantEmail(selectedSalesperson.email);
+    }
+  }, [selectedSalesperson]);
+
+  // Handle Receipt Upload Drag & Drop
+  const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setDragging(false);
+  };
+
+  const handleFileConvert = (selectedFile: File) => {
+    setFile(selectedFile);
+    setFileName(selectedFile.name);
+
+    const reader = new FileReader();
+    reader.readAsDataURL(selectedFile);
+    reader.onload = () => {
+      setFileBase64(reader.result as string);
+    };
+    reader.onerror = (error) => {
+      console.error("FileReader Error: ", error);
+    };
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileConvert(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileConvert(e.target.files[0]);
+    }
+  };
+
+  // Submit Claim
+  const handleSubmitClaim = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!claimantName || !claimantEmail) {
+      setFormStatus({ type: 'error', message: 'Please complete all required fields.' });
+      return;
+    }
+
+    // Validate all expense lines
+    for (let i = 0; i < expenseLines.length; i++) {
+      const line = expenseLines[i];
+      if (line.category === 'Travel') {
+        if (!line.origin || !line.destination || !line.amount || !line.category || !line.claimDate) {
+          setFormStatus({ type: 'error', message: `Please complete Origin (From) and Destination (To) fields for Item #${i + 1}.` });
+          return;
+        }
+      } else {
+        if (!line.title || !line.amount || !line.category || !line.claimDate) {
+          setFormStatus({ type: 'error', message: `Please complete all required fields for Item #${i + 1}.` });
+          return;
+        }
+      }
+    }
+
+    setFormStatus({ type: 'submitting', message: `Filing ${expenseLines.length} claim logs to Google Sheets & Drive...` });
+
     try {
-      const res = await fetch('/api/claim', {
+      const successfulIds: string[] = [];
+      
+      for (let i = 0; i < expenseLines.length; i++) {
+        const line = expenseLines[i];
+        const submissionTitle = line.category === 'Travel'
+          ? `Travel from ${line.origin?.trim()} to ${line.destination?.trim()}`
+          : line.title;
+
+        setFormStatus({ 
+          type: 'submitting', 
+          message: `Filing Item #${i + 1} of ${expenseLines.length}: "${submissionTitle}" (₹${line.amount})...` 
+        });
+
+        const response = await fetch('/api/claims', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            claimDate: line.claimDate,
+            claimantName,
+            claimantEmail,
+            title: submissionTitle,
+            amount: line.amount,
+            category: line.category,
+            branch: selectedBranch.name,
+            description: line.description,
+            fileBase64,
+            fileName,
+            branchHeadEmail: selectedBranch.headEmail
+          })
+        });
+
+        const resData = await response.json();
+        if (resData.success) {
+          successfulIds.push(resData.claim.id);
+        } else {
+          throw new Error(resData.error || `Server failed to process Item #${i + 1}`);
+        }
+      }
+
+      setFormStatus({ 
+        type: 'success', 
+        message: `Successfully registered ${successfulIds.length} expense claims! (IDs: ${successfulIds.join(', ')})` 
+      });
+      
+      // Reset inputs
+      setExpenseLines([
+        {
+          id: "line_1",
+          title: '',
+          origin: '',
+          destination: '',
+          amount: '',
+          category: CATEGORIES[0],
+          claimDate: new Date().toISOString().split('T')[0],
+          description: ''
+        }
+      ]);
+      setFile(null);
+      setFileBase64('');
+      setFileName('');
+      setSelectedSalesperson('custom');
+      
+      // Reload table logs
+      fetchClaims();
+    } catch (err: any) {
+      setFormStatus({ type: 'error', message: `One or more claims failed: ${err.message}` });
+    }
+  };
+
+  // Admin Verification Login Action
+  const handleAdminVerify = (e: React.FormEvent) => {
+    e.preventDefault();
+    const normalizedInput = adminEmailInput.trim().toLowerCase();
+    
+    const AUTHORIZED_ADMINS = [
+      'cash.udhna@ginzalimited.com',
+      'kavita.acharya@ginzalimited.com',
+      'rohit.sethia@ginzalimited.com',
+      'arvind.sethia@ginzalimited.com',
+      'mis.mumbai@ginzalimited.com',
+      'ea.mumbai@ginzalimited.com'
+    ];
+    
+    // Accept standard authorized email list
+    if (AUTHORIZED_ADMINS.includes(normalizedInput) || normalizedInput === 'expenses.ginzalimited@gmail.com') {
+      setIsAdminLoggedIn(true);
+      setAdminLoggedInEmail(normalizedInput);
+      setAdminEmailError('');
+    } else {
+      setAdminEmailError('Access Denied. Email address is not in the authorized Admin / Accounts list.');
+    }
+  };
+
+  // Admin claim action submission (Approve, Reject, Process, Release)
+  const handleAdminAction = async (status: 'Approved' | 'Rejected' | 'Processed' | 'Released') => {
+    if (!selectedClaim) return;
+    
+    setActionStatus({ type: 'updating', message: `Setting claim logs to ${status}...` });
+
+    try {
+      const response = await fetch('/api/claims/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formData,
-          items,
-          grandTotal,
-          branchHeadEmail: selectedBranch?.headEmail
+          id: selectedClaim.id,
+          status,
+          remarks: remarksState,
+          claimantEmail: selectedClaim.claimantEmail,
+          title: selectedClaim.title,
+          amount: selectedClaim.amount,
+          rowIndex: (selectedClaim as any).rowIndex,
+          branchName: (selectedClaim as any).sheetName
         })
       });
 
-      const clone = res.clone();
-      if (res.ok) {
-        toast.success('Claim submitted successfully!');
-        setFormData({
-          branchName: '',
-          salespersonName: '',
-          salespersonEmail: '',
-        });
-        setItems([{
-          id: crypto.randomUUID(),
-          category: 'Food',
-          itemDate: '',
-          fromLoc: '',
-          toLoc: '',
-          amount: '',
-          attachment: '',
-          remark: ''
-        }]);
-      } else {
-        let text = "";
-        try {
-          text = await clone.text();
-        } catch {
-          try {
-            text = await res.text();
-          } catch {
-            text = "Error reading response body";
-          }
-        }
-        try {
-          const errData = JSON.parse(text);
-          toast.error(`Submission failed: ${errData.error || res.statusText}`);
-        } catch {
-          const cleanText = text.slice(0, 100);
-          toast.error(`Submission Server Error (${res.status}): ${cleanText}... Please check /api/diagnose for diagnostics.`);
-        }
-      }
-    } catch (error: any) {
-      console.error(error);
-      toast.error(`Submission connection failed: ${error.message || error}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+      const resData = await response.json();
+      if (resData.success) {
+        setActionStatus({ type: 'success', message: `Successfully saved ${status} state to Sheets.` });
+        setTimeout(() => {
+          setSelectedClaim(null);
+          setRemarksState('');
+          setActionStatus({ type: 'idle', message: '' });
+        }, 1500);
 
-  const handleAdminAction = async (action: string, claimGroup: Claim[], extraData?: any) => {
-    setLoading(true);
-    try {
-      // Use the first claim in group for row index reference
-      const claim = claimGroup[0];
-      const res = await fetch('/api/admin/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action, 
-          rowIndex: claim.rowIndex, 
-          claimId: claim.submissionid,
-          sheetName: claim.sheetName,
-          adminName: extraData?.adminName,
-          adminEmail: extraData?.adminEmail,
-          data: { ...claim, ...extraData } 
-        })
-      });
-
-      const clone = res.clone();
-      if (res.ok) {
-        toast.success(`Action ${action} successful`);
+        // Instantly reload database claims so updates represent perfectly!
         fetchClaims();
       } else {
-        let text = "";
-        try {
-          text = await clone.text();
-        } catch {
-          try {
-            text = await res.text();
-          } catch {
-            text = "Error reading response body";
-          }
-        }
-        try {
-          const errData = JSON.parse(text);
-          toast.error(`Action ${action} failed: ${errData.error || res.statusText}`);
-        } catch {
-          const cleanText = text.slice(0, 100);
-          toast.error(`Action Error (${res.status}): ${cleanText}... Please check /api/diagnose for diagnostics.`);
-        }
+        setActionStatus({ type: 'error', message: resData.error || 'Failed to sync update to Google Sheets.' });
       }
-    } catch (error: any) {
-      console.error(error);
-      toast.error(`Action connection failed: ${error.message || error}`);
-    } finally {
-      setLoading(false);
+    } catch (err: any) {
+      setActionStatus({ type: 'error', message: `Server update failed: ${err.message}` });
     }
   };
 
+  // Filters calculation
+  const filteredClaims = claims.filter(c => {
+    const matchesSearch = 
+      c.claimantName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      c.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      c.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      c.claimantEmail.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesBranch = !branchFilter || c.branch === branchFilter;
+    const matchesStatus = !statusFilter || c.status === statusFilter;
+
+    return matchesSearch && matchesBranch && matchesStatus;
+  });
+
+
+
   return (
-    <div className="min-h-screen bg-[#F5F5F0] text-[#141414] font-sans">
-      <Toaster position="top-center" />
+    <div id="app_root" className="min-h-screen bg-slate-50 flex flex-col selection:bg-slate-200">
       
-      {/* Header */}
-      <header className="bg-white border-b border-[#141414]/10 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-[#141414] p-2 rounded-lg">
-              <IndianRupee className="text-white w-5 h-5" />
+      {/* Visual Navigation Header */}
+      <header id="app_header" className="bg-slate-900 text-white shadow-xl px-4 sm:px-8 py-5 border-b border-slate-800">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-4">
+            <div className="bg-white rounded-lg p-1.5 h-12 flex items-center justify-center shadow-lg border border-slate-700/50">
+              <img 
+                src="https://www.ginzalimited.com/cdn/shop/files/Ginza_logo.jpg?v=1668509673&width=600" 
+                alt="GINZA Logo" 
+                className="h-full object-contain"
+                style={{ maxWidth: '140px' }}
+                referrerPolicy="no-referrer"
+              />
             </div>
-            <h1 className="font-bold text-xl tracking-tight uppercase">ExpensePro</h1>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                Ginza Industries
+                <span className="text-xs font-semibold px-2 py-0.5 bg-blue-550 bg-opacity-20 text-blue-400 rounded border border-blue-500/30">Expenses Log</span>
+              </h1>
+              <p className="text-[11px] text-slate-400">Secure Employee Reimbursement & Google Sheets Persistence Portal</p>
+            </div>
           </div>
           
-          <Tabs value={activeTab} onValueChange={handleTabChange} className="flex">
-            <TabsList className="bg-[#141414]/5 border border-[#141414]/10">
-              <TabsTrigger value="submit" className="text-[10px] md:text-xs uppercase font-black data-[state=active]:bg-[#141414] data-[state=active]:text-white">Submit</TabsTrigger>
-              <TabsTrigger value="admin" className="text-[10px] md:text-xs uppercase font-black data-[state=active]:bg-[#141414] data-[state=active]:text-white">Admin</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="hidden lg:flex border-[#141414] text-[10px] font-bold">V1.28.0</Badge>
+          <div className="flex bg-slate-850 p-1 rounded-lg border border-slate-800">
+            <button 
+              id="raise_tab_btn"
+              onClick={() => setActiveTab('raise')}
+              className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all ${
+                activeTab === 'raise' 
+                  ? 'bg-blue-600 text-white shadow' 
+                  : 'text-slate-450 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              Raise Claims Form
+            </button>
+            <button 
+              id="admin_tab_btn"
+              onClick={() => setActiveTab('admin')}
+              className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                activeTab === 'admin' 
+                  ? 'bg-indigo-600 text-white shadow' 
+                  : 'text-slate-450 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Lock className="h-3.5 w-3.5" />
+              Admin tab
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-12">
+      {/* Main Body Layout */}
+      <main className="flex-1 w-full max-w-7xl mx-auto p-4 sm:p-8">
         <AnimatePresence mode="wait">
-          {activeTab === 'submit' ? (
-            <motion.div
-              key="submit"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              className="max-w-4xl mx-auto space-y-8"
+          
+          {/* TAB 1: RAISE CLAIM FORM */}
+          {activeTab === 'raise' && (
+            <motion.div 
+              key="raise-claims"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.25 }}
+              className="grid grid-cols-1 lg:grid-cols-12 gap-8"
             >
-              <div className="text-center space-y-2 mb-8">
-                <Badge variant="outline" className="border-[#141414] text-[8px] py-0.5 px-3 tracking-widest uppercase opacity-60">Official Personnel Only</Badge>
-                <h2 className="text-[12px] font-black italic tracking-tighter uppercase leading-tight">
-                  Seamless <br className="md:hidden"/> Expense Claims
-                </h2>
-                <p className="max-w-xs mx-auto text-[#141414]/60 font-serif italic text-[9px]">
-                  Register business expenses with instant verification.
-                </p>
-              </div>
+              
+              {/* Left Column: Branch & Policy Info */}
+              <div className="lg:col-span-4 space-y-6">
+                
+                {/* Branch Head Contacts Card */}
+                <div className="bg-white rounded-xl shadow-md border border-slate-200 p-6">
+                  <h3 className="text-sm font-semibold text-slate-900 border-b border-slate-100 pb-3 mb-4 flex items-center gap-2">
+                    <Building2 className="h-4.5 w-4.5 text-blue-500" />
+                    Selected Branch Information
+                  </h3>
+                  
+                  {/* Select Branch Input */}
+                  <div className="mb-5">
+                    <label className="block text-xs font-medium text-slate-500 mb-2">Target Office Branch</label>
+                    <select 
+                      id="branch_select"
+                      value={selectedBranch.name} 
+                      onChange={(e) => {
+                        const br = BRANCHES.find(b => b.name === e.target.value);
+                        if (br) {
+                          setSelectedBranch(br);
+                          setSelectedSalesperson('custom');
+                        }
+                      }}
+                      className="w-full bg-slate-50 border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {BRANCHES.map(b => (
+                        <option key={b.name} value={b.name}>{b.name} Branch</option>
+                      ))}
+                    </select>
+                  </div>
 
-              <Card className="max-w-md mx-auto border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] overflow-hidden bg-white">
-                <div className="bg-[#141414] text-white px-2 py-1.5 flex justify-between items-center">
-                  <span className="text-[7px] font-black uppercase tracking-[0.1em]">Submission // v1.2</span>
-                  <div className="flex gap-1">
-                    <div className="w-1 h-1 rounded-full bg-red-400"></div>
-                    <div className="w-1 h-1 rounded-full bg-yellow-400"></div>
-                    <div className="w-1 h-1 rounded-full bg-green-400"></div>
+                  <div className="space-y-4 pt-2">
+                    <div className="bg-blue-50 bg-opacity-50 rounded-lg p-4 border border-blue-100">
+                      <p className="text-xs uppercase tracking-wider font-semibold text-blue-600 mb-2">Branch Head</p>
+                      <h4 className="text-sm font-bold text-slate-800">{selectedBranch.headName}</h4>
+                      <div className="space-y-1.5 mt-3 text-xs text-slate-600">
+                        <p className="flex items-center gap-2">
+                          <Mail className="h-3.5 w-3.5 text-slate-400" />
+                          {selectedBranch.headEmail}
+                        </p>
+                        <p className="flex items-center gap-2">
+                          <Phone className="h-3.5 w-3.5 text-slate-400" />
+                          +91 {selectedBranch.headPhone}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <CardHeader className="pt-2 pb-0.5 px-4 text-center">
-                  <CardTitle className="text-[9px] font-black italic tracking-tighter uppercase opacity-40">ITEM SUBMISSION PORTAL</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 px-4 pb-4">
-                  <form onSubmit={handleSubmit} className="space-y-3">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="branch" className="text-[10px] uppercase font-bold opacity-50">Branch</Label>
-                        <Select value={formData.branchName} onValueChange={handleBranchChange}>
-                          <SelectTrigger className="h-8 text-xs border-[#141414]">
-                            <SelectValue placeholder="Branch" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {BRANCH_DATA.map(b => (
-                              <SelectItem key={b.name} value={b.name}>{b.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="name" className="text-[10px] uppercase font-bold opacity-50">Name</Label>
-                        <Select value={formData.salespersonName} onValueChange={handleSalespersonChange} disabled={!formData.branchName}>
-                          <SelectTrigger className="h-8 text-xs border-[#141414]">
-                            <SelectValue placeholder="Name" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {salespeople.map(s => (
-                              <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="email" className="text-[10px] uppercase font-bold opacity-50">Auto-Detected Email</Label>
-                      <Input id="email" readOnly value={formData.salespersonEmail} className="h-8 text-xs border-[#141414] bg-[#F5F5F0] italic" />
+
+              </div>
+
+              {/* Right Column: Submission Form */}
+              <form id="expense_claim_form" onSubmit={handleSubmitClaim} className="lg:col-span-8 bg-white rounded-xl shadow-md border border-slate-200 p-6 sm:p-8 space-y-6">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-indigo-500" />
+                    Enter Expense Claim Log Details
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Please provide accurate transaction info and attachments. This will append a secure database row to the Google Spreadsheet logs.</p>
+                </div>
+
+                {formStatus.type !== 'idle' && (
+                  <div className={`p-4 rounded-lg text-sm flex items-start gap-3 border ${
+                    formStatus.type === 'submitting' 
+                      ? 'bg-blue-50 text-blue-800 border-blue-200' 
+                      : formStatus.type === 'success' 
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                  }`}>
+                    {formStatus.type === 'submitting' && <RefreshCw className="h-5 w-5 text-blue-500 animate-spin mt-0.5 flex-shrink-0" />}
+                    {formStatus.type === 'success' && <CheckCircle className="h-5 w-5 text-emerald-500 mt-0.5 flex-shrink-0" />}
+                    {formStatus.type === 'error' && <XCircle className="h-5 w-5 text-rose-500 mt-0.5 flex-shrink-0" />}
+                    <p className="font-medium">{formStatus.message}</p>
+                  </div>
+                )}
+
+                {/* Section 1: Claimant Profile Identification */}
+                <div className="bg-slate-50 rounded-lg p-5 border border-slate-200 space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                    <User className="h-3.5 w-3.5" />
+                    1. Claimant Identification
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Select Salesperson Profile</label>
+                      <select 
+                        id="salesperson_select"
+                        value={selectedSalesperson === 'custom' ? 'custom' : selectedSalesperson.email} 
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === 'custom') {
+                            setSelectedSalesperson('custom');
+                          } else {
+                            const found = selectedBranch.salespeople.find(s => s.email === val);
+                            if (found) setSelectedSalesperson(found);
+                          }
+                        }}
+                        className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        {selectedBranch.salespeople.map(s => (
+                          <option key={s.email} value={s.email}>{s.name} ({s.email})</option>
+                        ))}
+                        <option value="custom">-- Custom Claimant (Specify Details) --</option>
+                      </select>
                     </div>
 
-                    <div className="space-y-4 pt-4 border-t border-[#141414]/10">
-                      <div className="flex justify-between items-center bg-[#141414] text-white py-1 px-2 rounded-sm">
-                        <h4 className="text-[9px] font-black uppercase tracking-widest">Expense Entry</h4>
-                        <span className="text-[8px] opacity-40 italic">#Entries: {items.length}</span>
-                      </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-750 mb-1">Claimant Name <span className="text-rose-500">*</span></label>
+                      <input 
+                        id="claimant_name_input"
+                        type="text" 
+                        required
+                        disabled={selectedSalesperson !== 'custom'}
+                        value={claimantName}
+                        onChange={(e) => setClaimantName(e.target.value)}
+                        placeholder="John Doe"
+                        className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-550"
+                      />
+                    </div>
+                  </div>
 
-                      {items.map((item, index) => (
-                        <div key={item.id} className="relative p-3 border border-dashed border-[#141414]/20 rounded-lg space-y-3 bg-slate-50/30">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[8px] font-bold bg-[#141414] text-white px-1.5 rounded">ITEM {index + 1}</span>
-                            {items.length > 1 && (
-                              <Button 
-                                type="button" 
-                                variant="ghost"
-                                size="sm" 
-                                className="h-5 px-1 text-[8px] uppercase font-black text-red-500 hover:text-red-600 hover:bg-red-50"
-                                onClick={() => removeItem(item.id)}
-                              >
-                                Delete
-                              </Button>
-                            )}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-750 mb-1">Claimant Email Address <span className="text-rose-500">*</span></label>
+                    <input 
+                      id="claimant_email_input"
+                      type="email" 
+                      required
+                      disabled={selectedSalesperson !== 'custom'}
+                      value={claimantEmail}
+                      onChange={(e) => setClaimantEmail(e.target.value)}
+                      placeholder="employee@ginzalimited.com"
+                      className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-550"
+                    />
+                  </div>
+                </div>
+
+                {/* Section 2: Expense Core Logs */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5" />
+                      2. Expense Log Info
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={handleAddLine}
+                      className="px-3 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[11px] font-bold rounded-lg flex items-center gap-1 border border-indigo-200 transition-colors"
+                    >
+                      <span>+ Add Row / Field Claim</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {expenseLines.map((line, index) => (
+                      <div key={line.id} className="relative p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-4">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-500">Claim Row Item #{index + 1}</span>
+                          {expenseLines.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveLine(line.id)}
+                              className="text-[11px] text-rose-500 hover:text-rose-700 font-bold flex items-center gap-0.5 transition-colors"
+                            >
+                              <XCircle className="h-3.5 w-3.5" />
+                              Remove Row
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Category <span className="text-rose-500">*</span></label>
+                            <select 
+                              value={line.category} 
+                              onChange={(e) => handleUpdateLine(line.id, 'category', e.target.value)}
+                              className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                            >
+                              {CATEGORIES.map(cat => (
+                                <option key={cat} value={cat}>{cat}</option>
+                              ))}
+                            </select>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <Label className="text-[9px] font-bold uppercase opacity-60">Category</Label>
-                              <Select value={item.category} onValueChange={v => updateItem(item.id, 'category', v)}>
-                                <SelectTrigger className="h-7 text-[10px] border-[#141414]/20">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Travel">Travel</SelectItem>
-                                  <SelectItem value="Food">Food</SelectItem>
-                                  <SelectItem value="Stay">Stay</SelectItem>
-                                  <SelectItem value="Misc">Misc</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-[9px] font-bold uppercase opacity-60">Date</Label>
-                              <Input type="date" value={item.itemDate} onChange={e => updateItem(item.id, 'itemDate', e.target.value)} required className="h-7 text-[10px] border-[#141414]/20" />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-[9px] font-bold uppercase opacity-60">Amount (₹)</Label>
-                              <Input type="number" placeholder="0.00" value={item.amount} onChange={e => updateItem(item.id, 'amount', e.target.value)} required className="h-7 text-[10px] border-[#141414]/20" />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-[9px] font-bold uppercase opacity-60 flex items-center gap-1">
-                                <FileText className="w-2 h-2" /> Upload
-                              </Label>
-                              <Input 
-                                type="file" 
-                                accept="image/*,.pdf,.doc,.docx"
-                                onChange={e => handleFileChange(item.id, e.target.files ? e.target.files[0] : null)}
-                                className="h-7 text-[8px] border-[#141414]/20 p-0 file:h-full file:bg-[#141414] file:text-white file:border-0 file:px-2" 
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Transaction Date <span className="text-rose-500">*</span></label>
+                            <div className="relative">
+                              <input 
+                                type="date" 
+                                required
+                                value={line.claimDate}
+                                onChange={(e) => handleUpdateLine(line.id, 'claimDate', e.target.value)}
+                                className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                               />
                             </div>
                           </div>
-
-                          <AnimatePresence>
-                            {item.category === 'Travel' && (
-                              <motion.div 
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                className="grid grid-cols-2 gap-3 overflow-hidden"
-                              >
-                                <Input placeholder="From" value={item.fromLoc} onChange={e => updateItem(item.id, 'fromLoc', e.target.value)} className="h-7 text-[10px] border-[#141414]/20" />
-                                <Input placeholder="To" value={item.toLoc} onChange={e => updateItem(item.id, 'toLoc', e.target.value)} className="h-7 text-[10px] border-[#141414]/20" />
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-
-                          <Input placeholder="Brief remark..." value={item.remark} onChange={e => updateItem(item.id, 'remark', e.target.value)} className="h-7 text-[10px] border-[#141414]/20" />
                         </div>
-                      ))}
-                    </div>
 
-                    <div className="space-y-3 pt-2">
-                      <Button 
-                        type="button" 
-                        variant="outline" 
-                        className="w-full border border-dashed border-[#141414] h-8 text-[9px] uppercase font-black hover:bg-[#141414] hover:text-white transition-colors"
-                        onClick={addItem}
-                      >
-                        + Add Next Item
-                      </Button>
+                        {line.category === 'Travel' ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div>
+                              <label className="block text-xs font-medium text-slate-700 mb-1">Origin (From) <span className="text-rose-500">*</span></label>
+                              <input 
+                                type="text" 
+                                required
+                                value={line.origin || ''}
+                                onChange={(e) => handleUpdateLine(line.id, 'origin', e.target.value)}
+                                placeholder="e.g. Mumbai Office"
+                                className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-slate-700 mb-1">Destination (To) <span className="text-rose-500">*</span></label>
+                              <input 
+                                type="text" 
+                                required
+                                value={line.destination || ''}
+                                onChange={(e) => handleUpdateLine(line.id, 'destination', e.target.value)}
+                                placeholder="e.g. Surat Factory"
+                                className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-slate-700 mb-1">Cost (INR - ₹) <span className="text-rose-500">*</span></label>
+                              <div className="relative">
+                                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-medium text-sm">₹</span>
+                                <input 
+                                  type="number" 
+                                  required
+                                  min="1"
+                                  step="0.01"
+                                  value={line.amount}
+                                  onChange={(e) => handleUpdateLine(line.id, 'amount', e.target.value)}
+                                  placeholder="2450.00"
+                                  className="w-full bg-white border border-slate-250 py-2 pl-7 pr-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-medium text-slate-700 mb-1">Expense Title / Title <span className="text-rose-500">*</span></label>
+                              <input 
+                                type="text" 
+                                required
+                                value={line.title}
+                                onChange={(e) => handleUpdateLine(line.id, 'title', e.target.value)}
+                                placeholder="Client Meeting hotel fare / stationery etc."
+                                className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-slate-700 mb-1">Cost (INR - ₹) <span className="text-rose-500">*</span></label>
+                              <div className="relative">
+                                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-medium text-sm">₹</span>
+                                <input 
+                                  type="number" 
+                                  required
+                                  min="1"
+                                  step="0.01"
+                                  value={line.amount}
+                                  onChange={(e) => handleUpdateLine(line.id, 'amount', e.target.value)}
+                                  placeholder="2450.00"
+                                  className="w-full bg-white border border-slate-250 py-2 pl-7 pr-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
-                      <div className="bg-[#141414] text-white p-3 rounded-md flex justify-between items-center">
-                        <span className="font-bold uppercase tracking-widest text-[8px] opacity-60">Total Payable</span>
-                        <span className="text-xl font-black italic tracking-tighter">₹{grandTotal}</span>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-705 mb-1">Remark</label>
+                          <textarea 
+                            rows={2}
+                            value={line.description}
+                            onChange={(e) => handleUpdateLine(line.id, 'description', e.target.value)}
+                            placeholder="Add any additional remarks, passengers, context, etc."
+                            className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
                       </div>
-                    </div>
-
-                    <Button type="submit" disabled={loading} className="w-full bg-[#141414] hover:bg-[#141414]/90 text-white font-bold h-8 text-[10px] uppercase shadow-[1px_1px_0px_0px_#888] border border-[#141414]">
-                      {loading ? 'Transmitting...' : 'Confirm Submission'}
-                      <Send className="ml-2 w-2.5 h-2.5" />
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="admin"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="space-y-8"
-            >
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col md:flex-row gap-6 justify-between items-start md:items-end">
-                  <div>
-                    <h2 className="text-4xl font-black uppercase italic">Claims Dashboard</h2>
-                    <p className="text-[#141414]/60 font-serif italic">Review and process employee claims securely.</p>
+                    ))}
                   </div>
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    {user ? (
-                      <div className="flex items-center gap-3 bg-white border-2 border-blue-600 p-1.5 pr-4 rounded-xl shadow-[4px_4px_0px_0px_rgba(37,99,235,1)]">
-                        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-black text-sm">
-                          {user.displayName?.charAt(0)}
+                </div>
+
+                {/* Section 3: Invoices & Receipts Attachments */}
+                <div className="space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                    <Upload className="h-3.5 w-3.5" />
+                    3. Receipt Attachment (Saved directly to Google Drive)
+                  </h3>
+
+                  <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+                      dragging 
+                        ? 'border-blue-500 bg-blue-50 bg-opacity-30' 
+                        : file 
+                        ? 'border-emerald-300 bg-emerald-50 bg-opacity-10' 
+                        : 'border-slate-300 hover:border-slate-400 bg-slate-50'
+                    }`}
+                  >
+                    <input 
+                      type="file" 
+                      ref={fileInputRef}
+                      onChange={handleFileInputChange}
+                      className="hidden" 
+                      accept="image/*,application/pdf"
+                    />
+                    
+                    {file ? (
+                      <div className="space-y-2">
+                        <FileCheck className="h-10 w-10 text-emerald-500 mx-auto" />
+                        <div>
+                          <p className="text-sm font-bold text-slate-800">{fileName}</p>
+                          <p className="text-xs text-slate-500">{(file.size / (1024 * 1024)).toFixed(2)} MB &bull; Selected</p>
                         </div>
-                        <div className="text-left">
-                          <p className="text-[10px] font-black uppercase leading-none">{user.displayName}</p>
-                          <p className="text-[8px] opacity-40 font-mono">{user.email}</p>
-                        </div>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-6 w-6 ml-2 text-slate-400 hover:text-red-500"
-                          onClick={handleLogout}
+                        <button 
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFile(null);
+                            setFileBase64('');
+                            setFileName('');
+                          }}
+                          className="text-xs font-semibold text-rose-500 hover:text-rose-700 bg-white py-1 px-3 rounded-full border border-rose-200 mt-2 shadow-sm"
                         >
-                          <LogOut className="w-3 h-3" />
-                        </Button>
+                          Remove File
+                        </button>
                       </div>
                     ) : (
-                      <Dialog>
-                        <DialogTrigger
-                          render={
-                            <Button className="bg-blue-600 border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] hover:bg-blue-700 h-10 px-4 font-black uppercase text-xs italic">
-                              <LogIn className="w-4 h-4 mr-2" /> Admin Sign In
-                            </Button>
-                          }
-                        />
-                        <DialogContent className="max-w-md border-2 border-[#141414] shadow-[8px_8px_0px_0px_rgba(20,20,20,1)] p-6 bg-white rounded-xl">
-                          <DialogHeader>
-                            <DialogTitle className="text-xl font-black uppercase italic tracking-tight">
-                              Administrative Entry
-                            </DialogTitle>
-                            <DialogDescription className="font-serif italic text-xs text-slate-500">
-                              Access the claims dashboard using your administrator credentials or register an account.
-                            </DialogDescription>
-                          </DialogHeader>
-                          <Tabs value={authTab} onValueChange={setAuthTab} className="w-full mt-4">
-                            <TabsList className="grid grid-cols-2 bg-slate-100 p-1 rounded-lg border border-[#141414]/10">
-                              <TabsTrigger value="login" className="font-black uppercase text-xs">Login</TabsTrigger>
-                              <TabsTrigger value="register" className="font-black uppercase text-xs">Register</TabsTrigger>
-                            </TabsList>
-                            <TabsContent value="login" className="space-y-4 pt-4 text-left">
-                              <div className="space-y-1">
-                                <Label className="text-[10px] font-black uppercase">Email Address</Label>
-                                <Input 
-                                  type="email" 
-                                  placeholder="admin@expense.com" 
-                                  value={loginEmail} 
-                                  onChange={(e) => setLoginEmail(e.target.value)}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-[10px] font-black uppercase">Password</Label>
-                                <Input 
-                                  type="password" 
-                                  placeholder="••••••••" 
-                                  value={loginPassword} 
-                                  onChange={(e) => setLoginPassword(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') handleCustomLogin();
-                                  }}
-                                />
-                                <span className="text-[9px] text-slate-400 italic block mt-1">
-                                  * Quick Demo Login: Use <b>admin@expense.com</b> with password <b>admin123</b>
-                                </span>
-                              </div>
-                              <Button 
-                                onClick={handleCustomLogin} 
-                                className="w-full bg-[#141414] hover:bg-slate-800 text-white uppercase font-black text-xs h-10 border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]"
-                              >
-                                Sign In
-                              </Button>
-                            </TabsContent>
-                            <TabsContent value="register" className="space-y-4 pt-4 text-left">
-                              <div className="space-y-1">
-                                <Label className="text-[10px] font-black uppercase">Full Name</Label>
-                                <Input 
-                                  type="text" 
-                                  placeholder="John Doe" 
-                                  value={registerName} 
-                                  onChange={(e) => setRegisterName(e.target.value)}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-[10px] font-black uppercase">Email Address</Label>
-                                <Input 
-                                  type="email" 
-                                  placeholder="john@example.com" 
-                                  value={registerEmail} 
-                                  onChange={(e) => setRegisterEmail(e.target.value)}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-[10px] font-black uppercase">Password</Label>
-                                <Input 
-                                  type="password" 
-                                  placeholder="••••••••" 
-                                  value={registerPassword} 
-                                  onChange={(e) => setRegisterPassword(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') handleCustomRegister();
-                                  }}
-                                />
-                              </div>
-                              <Button 
-                                onClick={handleCustomRegister} 
-                                className="w-full bg-blue-600 hover:bg-blue-700 text-white uppercase font-black text-xs h-10 border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]"
-                              >
-                                Create Account
-                              </Button>
-                            </TabsContent>
-                          </Tabs>
-                        </DialogContent>
-                      </Dialog>
+                      <div className="space-y-2">
+                        <Upload className="h-10 w-10 text-slate-400 mx-auto" />
+                        <div>
+                          <p className="text-sm font-bold text-slate-800">Drag & Drop Invoice Attachment</p>
+                          <p className="text-xs text-slate-500 mt-0.5">or click here to search local device filesystem</p>
+                        </div>
+                        <p className="text-[10px] text-slate-400">Accepts PNG, JPG, JPEG, and PDF invoice receipts</p>
+                      </div>
                     )}
-                    <Button onClick={fetchClaims} loading={loading} variant="outline" className="border-[#141414] border-2 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] bg-white h-10 font-black uppercase text-xs italic">
-                      Refresh Data
-                    </Button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-white border-2 border-[#141414] rounded-xl shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]">
-                  <div className="space-y-1">
-                    <Label className="text-[10px] font-black uppercase opacity-60">Employee</Label>
-                    <Input 
-                      placeholder="Search name..." 
-                      value={filters.employeeSearch}
-                      onChange={e => setFilters(prev => ({ ...prev, employeeSearch: e.target.value }))}
-                      className="h-8 text-xs border-[#141414]/20" 
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] font-black uppercase opacity-60">Branch</Label>
-                    <Select value={filters.branch} onValueChange={(v) => setFilters(prev => ({ ...prev, branch: v }))}>
-                      <SelectTrigger className="h-8 text-xs border-[#141414]/20">
-                        <SelectValue placeholder="All Branches" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Branches</SelectItem>
-                        {BRANCH_DATA.map(b => (
-                          <SelectItem key={b.name} value={b.name}>{b.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] font-black uppercase opacity-60">Status</Label>
-                    <Select value={filters.status} onValueChange={(v) => setFilters(prev => ({ ...prev, status: v }))}>
-                      <SelectTrigger className="h-8 text-xs border-[#141414]/20">
-                        <SelectValue placeholder="All Status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Status</SelectItem>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="approved">Approved</SelectItem>
-                        <SelectItem value="released">Released</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] font-black uppercase opacity-60">Month</Label>
-                    <Select value={filters.month} onValueChange={(v) => setFilters(prev => ({ ...prev, month: v }))}>
-                      <SelectTrigger className="h-8 text-xs border-[#141414]/20">
-                        <SelectValue placeholder="All Months" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Months</SelectItem>
-                        {["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map(m => (
-                          <SelectItem key={m} value={m}>{m}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="flex gap-2 p-2 bg-[#141414] text-white rounded text-[8px] font-mono uppercase">
-                  <div className="flex items-center gap-1 border-r border-white/20 pr-2">
-                    <ShieldCheck className="w-2.5 h-2.5 text-green-400" />
-                    <span>Cloud Database: Connected</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <CreditCard className="w-2.5 h-2.5 text-blue-400" />
-                    <span>Spreadsheet Sync: Active</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white border-2 border-[#141414] rounded-xl overflow-x-auto shadow-[8px_8px_0px_rgba(20,20,20,1)]">
-                <Table>
-                  <TableHeader className="bg-[#141414]">
-                    <TableRow className="border-b border-white/20 hover:bg-transparent">
-                      <TableHead className="text-white font-black uppercase text-[7px] h-8 w-[100px]">ID / Date</TableHead>
-                      <TableHead className="text-white font-black uppercase text-[7px] h-8">Branch</TableHead>
-                      <TableHead className="text-white font-black uppercase text-[7px] h-8">Employee</TableHead>
-                      <TableHead className="text-white font-black uppercase text-[7px] h-8">Category</TableHead>
-                      <TableHead className="text-white font-black uppercase text-[7px] h-8">Details</TableHead>
-                      <TableHead className="text-white font-black uppercase text-[7px] h-8 text-right">Amount</TableHead>
-                      <TableHead className="text-white font-black uppercase text-[7px] h-8 max-w-[150px]">Admin Remark</TableHead>
-                      <TableHead className="text-white font-black uppercase text-[7px] h-8 text-center">Status</TableHead>
-                      <TableHead className="text-white font-black uppercase text-[7px] h-8 text-right pr-6 min-w-[100px]">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredGroups.map((group) => {
-                      const mainClaim = group[0];
-                      return (
-                        <TableRow key={mainClaim.submissionid} className="hover:bg-[#F5F5F0]/50 border-b border-[#141414]/10">
-                          <TableCell className="py-2">
-                            <div className="font-bold text-[9px]">{mainClaim.submissionid}</div>
-                            <div className="text-[7px] text-muted-foreground uppercase">{mainClaim.timestamp}</div>
-                            <Badge variant="outline" className="text-[6px] h-3 px-1 mt-1 opacity-60 bg-white">
-                              {group.length} ITEM(S)
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="py-2">
-                            <div className="font-bold uppercase text-[8px]">{mainClaim.branchname}</div>
-                          </TableCell>
-                          <TableCell className="py-2">
-                            <div className="font-bold uppercase text-[8px]">{mainClaim.salespersonname}</div>
-                            <div className="text-[7px] opacity-40 truncate max-w-[120px]">{mainClaim.employeeemail}</div>
-                          </TableCell>
-                          <TableCell className="py-2">
-                            <div className="space-y-1">
-                              {group.map((item, idx) => (
-                                <div key={idx} className="flex items-center gap-1">
-                                  <Badge variant="secondary" className="text-[6px] h-3 px-1 bg-slate-100/50">
-                                    {item.expensecategory}
-                                  </Badge>
-                                  <span className="text-[7px] font-mono">₹{item.amount}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-2">
-                            <div className="text-[8px] font-medium max-w-[150px] truncate">
-                              {group.map(item => item.fromlocation).filter(Boolean).join(', ')}
-                            </div>
-                            <div className="flex gap-1 mt-0.5">
-                              {group.some(i => i.attachmentlink && i.attachmentlink !== "Upload Failed") && (
-                                <Badge variant="outline" className="text-[6px] h-3 px-1 border-blue-200 text-blue-600 bg-blue-50">FILES</Badge>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-mono font-bold text-[10px] text-right py-2">
-                            ₹{mainClaim.grandtotal}
-                          </TableCell>
-                          <TableCell className="py-2">
-                            <div className="text-[8px] text-muted-foreground italic truncate max-w-[150px]">
-                              {mainClaim.adminremark || '---'}
-                            </div>
-                            {mainClaim.mailsent === 'Yes' && <Badge variant="outline" className="text-[6px] h-3 px-1 border-green-200 text-green-600 bg-green-50 mt-0.5">MAIL</Badge>}
-                          </TableCell>
-                          <TableCell className="py-2">
-                            <div className="flex flex-col items-center gap-0.5">
-                              <div className="flex gap-0.5">
-                                {mainClaim.approved === 'Yes' ? (
-                                  <Badge className="bg-green-100 text-green-700 border-green-200 text-[6px] h-3 px-1 font-bold">APPV</Badge>
-                                ) : (
-                                  <Badge variant="outline" className="text-[6px] h-3 px-1 font-bold opacity-40">PEND</Badge>
-                                )}
-                                {mainClaim.paymentprocess === 'Yes' && <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[6px] h-3 px-1 font-bold">PROC</Badge>}
-                              </div>
-                              {mainClaim.paymentrelease === 'Yes' && <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[6px] h-3 px-1 font-bold">RELS</Badge>}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right py-2">
-                            <AdminActionDialog 
-                              claim={mainClaim} 
-                              group={group} 
-                              onAction={(action, d) => handleAdminAction(action, group, d)} 
-                              predefinedAdmin={user ? { name: user.displayName || 'Admin', email: user.email || '' } : undefined}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                    {filteredGroups.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
-                          No claims found.
-                        </TableCell>
-                      </TableRow>
+                {/* Actions Panel */}
+                <div className="pt-4 border-t border-slate-150 flex justify-end">
+                  <button 
+                    id="submit_claim_btn"
+                    type="submit"
+                    disabled={formStatus.type === 'submitting'}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-6 rounded-lg text-sm shadow-md transition-all disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {formStatus.type === 'submitting' ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        Logging Claim...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-4 w-4" />
+                        Submit Expense Claim Log
+                      </>
                     )}
-                  </TableBody>
-                </Table>
-              </div>
+                  </button>
+                </div>
+
+              </form>
+
             </motion.div>
           )}
+
+          {/* TAB 2: ADMIN SECURE LOG CONSOLE */}
+          {activeTab === 'admin' && (
+            <motion.div 
+              key="admin-claims"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.25 }}
+              className="space-y-6"
+            >
+              
+              {/* ADMIN LOGIN LOCK SCREEN */}
+              {!isAdminLoggedIn ? (
+                <div className="max-w-md mx-auto bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden mt-8">
+                  <div className="bg-indigo-900 text-white p-6 text-center space-y-2">
+                    <Lock className="h-10 w-10 mx-auto text-indigo-400" />
+                    <h3 className="text-lg font-bold">Secure Admin Console Area</h3>
+                    <p className="text-xs text-indigo-200">Only authorized Admin &amp; Accounts emails can access management panels</p>
+                  </div>
+                  
+                  <form onSubmit={handleAdminVerify} className="p-6 space-y-4">
+                    {adminEmailError && (
+                      <div className="p-3 bg-rose-50 text-rose-800 text-xs rounded border border-rose-100 flex items-start gap-2">
+                        <AlertCircle className="h-4 w-4 text-rose-500 flex-shrink-0 mt-0.5" />
+                        <span>{adminEmailError}</span>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Enter Admin Email Address</label>
+                      <input 
+                        id="admin_email_input"
+                        type="email" 
+                        required
+                        value={adminEmailInput}
+                        onChange={(e) => setAdminEmailInput(e.target.value)}
+                        placeholder="mis.mumbai@ginzalimited.com"
+                        className="w-full bg-slate-50 border border-slate-250 py-2.5 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-150 p-3 rounded-lg space-y-2">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Authorized Admin / Accounts Emails:</p>
+                      <ul className="grid grid-cols-1 gap-1 text-[11px] text-slate-600 font-mono list-disc pl-4">
+                        <li>cash.udhna@ginzalimited.com</li>
+                        <li>kavita.acharya@ginzalimited.com</li>
+                        <li>rohit.sethia@ginzalimited.com</li>
+                        <li>arvind.sethia@ginzalimited.com</li>
+                        <li>mis.mumbai@ginzalimited.com</li>
+                        <li>ea.mumbai@ginzalimited.com</li>
+                      </ul>
+                    </div>
+
+                    <button 
+                      id="admin_login_submit_btn"
+                      type="submit"
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-lg text-sm shadow transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Lock className="h-4 w-4" />
+                      Verify Security Credentials
+                    </button>
+                    
+                    <div className="text-center">
+                      <p className="text-[10px] text-slate-400 bg-slate-50 p-2 rounded">
+                        Authorized configuration is parsed securely from Cloud Dev settings.
+                      </p>
+                    </div>
+                  </form>
+                </div>
+              ) : (
+                
+                // ADMIN CONSOLE ACTIVE DASHBOARD
+                <div className="space-y-6">
+                  
+                  {/* Top Welcome Title Banner */}
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">Live Workspace</span>
+                        <p className="text-xs text-slate-400">Logged as {adminLoggedInEmail || 'Admin'}</p>
+                      </div>
+                      <h2 className="text-xl font-extrabold text-slate-950 mt-1 flex items-center gap-2">
+                        Ginza Expenses Administration Console
+                      </h2>
+                    </div>
+
+                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                      <button 
+                        id="refresh_data_btn"
+                        onClick={fetchClaims}
+                        disabled={loadingClaims}
+                        className="flex-1 sm:flex-initial bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 py-2 px-4 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${loadingClaims ? 'animate-spin' : ''}`} />
+                        Refresh Data
+                      </button>
+                      
+                      <button 
+                        id="logout_btn"
+                        onClick={() => {
+                          setIsAdminLoggedIn(false);
+                          setAdminEmailInput('');
+                        }}
+                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 py-2 px-3 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
+                      >
+                        <LogOut className="h-3.5 w-3.5" />
+                        Logout
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Claims secure table container */}
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+                    
+                    {/* Header Action Tools */}
+                    <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
+                      <div>
+                        <h3 className="text-md font-extrabold text-slate-900">Submitted Expenses Claims Log Rows</h3>
+                        <p className="text-xs text-slate-500">Real-time rows mapped directly from shared Google Spreadsheet workspace.</p>
+                      </div>
+
+                      {/* Filters elements */}
+                      <div className="flex flex-wrap md:flex-nowrap gap-2.5 items-stretch">
+                        <div className="relative min-w-[200px]">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                            <Search className="h-4 w-4" />
+                          </span>
+                          <input 
+                            id="claim_search_input"
+                            type="text" 
+                            placeholder="Search Claims ID, Name, info..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="pl-9 bg-slate-50 border border-slate-250 py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+                          />
+                        </div>
+
+                        <select
+                          id="branch_filter_select"
+                          value={branchFilter}
+                          onChange={(e) => setBranchFilter(e.target.value)}
+                          className="bg-slate-50 border border-slate-250 py-1.5 px-2.5 rounded-lg text-xs font-semibold text-slate-700 focus:outline-none"
+                        >
+                          <option value="">All Branches</option>
+                          {BRANCHES.map(b => (
+                            <option key={b.name} value={b.name}>{b.name}</option>
+                          ))}
+                        </select>
+
+                        <select
+                          id="status_filter_select"
+                          value={statusFilter}
+                          onChange={(e) => setStatusFilter(e.target.value)}
+                          className="bg-slate-50 border border-slate-250 py-1.5 px-2.5 rounded-lg text-xs font-semibold text-slate-700 focus:outline-none"
+                        >
+                          <option value="">All Statuses</option>
+                          <option value="Pending">Pending</option>
+                          <option value="Approved">Approved</option>
+                          <option value="Rejected">Rejected</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Claims list display */}
+                    {loadingClaims ? (
+                      <div className="py-20 text-center">
+                        <RefreshCw className="h-8 w-8 text-indigo-500 animate-spin mx-auto mb-3" />
+                        <p className="text-xs text-slate-500 font-medium">Syncing database structures from Google Spreadsheet...</p>
+                      </div>
+                    ) : filteredClaims.length === 0 ? (
+                      <div className="text-center py-16 border rounded-xl bg-slate-50 border-slate-200">
+                        <AlertCircle className="h-10 w-10 text-slate-400 mx-auto mb-2" />
+                        <h4 className="text-sm font-bold text-slate-800">No Claims matched</h4>
+                        <p className="text-xs text-slate-500 mt-1">Adjust your filters parameters or submit a new claims expense above.</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-lg border border-slate-200">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                              <th className="py-3 px-4">Claim ID</th>
+                              <th className="py-3 px-4">Claimant Info</th>
+                              <th className="py-3 px-4">Details</th>
+                              <th className="py-3 px-4">Amount</th>
+                              <th className="py-3 px-4">Dates</th>
+                              <th className="py-3 px-4">Receipt</th>
+                              <th className="py-3 px-4">Status & Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 bg-white">
+                            {filteredClaims.map((item, idx) => (
+                              <tr key={`${item.id}-${idx}`} className="hover:bg-slate-50">
+                                
+                                <td className="py-3.5 px-4 font-bold text-slate-900 font-mono whitespace-nowrap">
+                                  {item.id}
+                                </td>
+
+                                <td className="py-3.5 px-4">
+                                  <div>
+                                    <p className="font-bold text-slate-800 leading-tight">{item.claimantName}</p>
+                                    <p className="text-[10px] text-slate-500">{item.claimantEmail}</p>
+                                    <span className="inline-block mt-1 font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-full text-[9px] border border-slate-200">
+                                      {item.branch}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                <td className="py-3.5 px-4">
+                                  <div className="max-w-xs space-y-1">
+                                    <p className="font-semibold text-slate-800 leading-snug">{item.title}</p>
+                                    <span className="inline-block text-[10px] font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-100">
+                                      {item.category}
+                                    </span>
+                                    {item.description && (
+                                      <p className="text-[10px] text-slate-550 break-words mt-0.5 max-w-[200px] truncate-3-lines leading-relaxed">{item.description}</p>
+                                    )}
+                                    {item.remarks && (
+                                      <p className="text-[10px] text-slate-650 bg-slate-100 p-1.5 rounded italic mt-1 border-l-2 border-slate-350 bg-opacity-80">
+                                        Admin: {item.remarks}
+                                      </p>
+                                    )}
+                                  </div>
+                                </td>
+
+                                <td className="py-3.5 px-4 font-extrabold text-slate-950 whitespace-nowrap text-sm">
+                                  ₹{item.amount.toLocaleString('en-IN')}
+                                </td>
+
+                                <td className="py-3.5 px-4 whitespace-nowrap text-slate-600">
+                                  <div>
+                                    <p className="leading-none text-[10px] text-slate-400 font-medium">Submitted:</p>
+                                    <p className="font-semibold">{item.submitDate}</p>
+                                    <p className="leading-none text-[10px] text-slate-400 font-medium mt-1">Claimed Date:</p>
+                                    <p>{item.claimDate}</p>
+                                  </div>
+                                </td>
+
+                                <td className="py-3.5 px-4">
+                                  {item.attachmentUrl ? (
+                                    <a 
+                                      href={item.attachmentUrl} 
+                                      target="_blank" 
+                                      referrerPolicy="no-referrer"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 font-semibold text-blue-600 hover:text-blue-800 underline hover:no-underline"
+                                    >
+                                      View Invoice
+                                    </a>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 italic">No receipt</span>
+                                  )}
+                                </td>
+
+                                <td className="py-3.5 px-4">
+                                  <div className="space-y-1.5">
+                                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                      item.status === 'Approved' 
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-250' 
+                                        : item.status === 'Processed'
+                                        ? 'bg-blue-50 text-blue-700 border-blue-250'
+                                        : item.status === 'Released'
+                                        ? 'bg-purple-50 text-purple-750 border-purple-250'
+                                        : item.status === 'Rejected' 
+                                        ? 'bg-rose-50 text-rose-700 border-rose-250' 
+                                        : 'bg-amber-50 text-amber-700 border-amber-250'
+                                    }`}>
+                                      {item.status || 'Pending'}
+                                    </span>
+                                    
+                                    <div>
+                                      <button 
+                                        onClick={() => {
+                                          setSelectedClaim(item);
+                                          setRemarksState(item.remarks || '');
+                                        }}
+                                        className={`mt-1 block py-1 px-2 rounded font-semibold text-[10px] shadow-sm transition-all cursor-pointer ${
+                                          item.status === 'Pending'
+                                            ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-900 border border-indigo-200'
+                                            : item.status === 'Approved'
+                                            ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200'
+                                            : item.status === 'Processed'
+                                            ? 'bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-900 border border-purple-200'
+                                            : 'bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200'
+                                        }`}
+                                      >
+                                        {item.status === 'Pending' && 'Resolve claim'}
+                                        {item.status === 'Approved' && 'Process payment'}
+                                        {item.status === 'Processed' && 'Release payment'}
+                                        {(item.status === 'Released' || item.status === 'Rejected') && 'View details'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </td>
+
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                  </div>
+
+                </div>
+              )}
+
+            </motion.div>
+          )}
+
         </AnimatePresence>
       </main>
 
-      <footer className="mt-20 border-t border-[#141414]/10 py-8 bg-white">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-[#141414] p-1.5 rounded">
-              <IndianRupee className="text-white w-4 h-4" />
-            </div>
-            <h1 className="font-bold uppercase text-sm">ExpensePro</h1>
-          </div>
-          <div className="text-[10px] opacity-30 uppercase tracking-widest font-bold">
-            © 2026 Enterprise Solutions
-          </div>
+      {/* ADMIN ACTION DIALOG POPUP / REMARKS DRAWER */}
+      <AnimatePresence>
+        {selectedClaim && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden"
+            >
+              
+              <div className="bg-slate-900 text-white p-5 border-b border-slate-800 flex justify-between items-center">
+                <div>
+                  <h3 className="font-extrabold text-sm flex items-center gap-2">
+                    <User className="h-4.5 w-4.5 text-indigo-400" />
+                    Review Claim: {selectedClaim.id}
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Validate Claimant Details and Google Sheet persistent outcomes</p>
+                </div>
+                <button 
+                  onClick={() => setSelectedClaim(null)}
+                  className="text-slate-400 hover:text-white text-lg font-bold"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                
+                {actionStatus.type !== 'idle' && (
+                  <div className={`p-3 rounded text-xs flex items-center gap-2 border ${
+                    actionStatus.type === 'updating' 
+                      ? 'bg-blue-50 text-blue-800 border-blue-200' 
+                      : actionStatus.type === 'success' 
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                  }`}>
+                    {actionStatus.type === 'updating' && <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />}
+                    {actionStatus.type === 'success' && <CheckCircle className="h-4 w-4 text-emerald-500" />}
+                    <p className="font-bold">{actionStatus.message}</p>
+                  </div>
+                )}
+
+                <div className="bg-slate-50 rounded p-4 text-xs space-y-2 border border-slate-200">
+                  <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Employee:</strong> {selectedClaim.claimantName} ({selectedClaim.claimantEmail})</p>
+                  <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Branch Office:</strong> {selectedClaim.branch}</p>
+                  <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Expense Title:</strong> <span className="font-bold text-slate-950">{selectedClaim.title}</span></p>
+                  <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block font-bold">Total Amount to Reimburse:</strong> <span className="text-slate-950 font-extrabold text-sm">₹{selectedClaim.amount.toLocaleString('en-IN')}</span></p>
+                  {selectedClaim.description && (
+                    <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Claim Description:</strong> <span className="italic text-slate-600 block bg-white p-2 rounded mt-1 border border-slate-150 leading-relaxed">{selectedClaim.description}</span></p>
+                  )}
+                  {selectedClaim.attachmentUrl && (
+                    <div className="pt-1">
+                      <a 
+                        href={selectedClaim.attachmentUrl} 
+                        target="_blank" 
+                        referrerPolicy="no-referrer"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 underline font-semibold flex items-center gap-1"
+                      >
+                        Open Receipt Invoice Attachment Link
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                {/* Status workflow stage tracker */}
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 text-[10px]">
+                  <div className={`p-2 rounded border ${
+                    (selectedClaim as any).approved === 'Yes' || selectedClaim.status === 'Approved' || selectedClaim.status === 'Processed' || selectedClaim.status === 'Released'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-850 font-medium' 
+                      : 'bg-slate-50 border-slate-250 text-slate-500'
+                  }`}>
+                    <p className="font-bold text-slate-900 border-b border-slate-100 pb-0.5 mb-1 text-[10.5px]">1. Approved</p>
+                    <p className="text-[9px] leading-tight text-slate-600">
+                      {(selectedClaim as any).approved === 'Yes' 
+                        ? ((selectedClaim as any).approvedDetails || 'Approved by Admin') 
+                        : 'Pending Approval'}
+                    </p>
+                  </div>
+                  <div className={`p-2 rounded border ${
+                    (selectedClaim as any).paymentProcess === 'Yes' || selectedClaim.status === 'Processed' || selectedClaim.status === 'Released'
+                      ? 'bg-blue-50 border-blue-200 text-blue-800 font-medium' 
+                      : 'bg-slate-50 border-slate-250 text-slate-500'
+                  }`}>
+                    <p className="font-bold text-slate-900 border-b border-slate-100 pb-0.5 mb-1 text-[10.5px]">2. Payment Process</p>
+                    <p className="text-[9px] leading-tight text-slate-600">
+                      {(selectedClaim as any).paymentProcess === 'Yes' 
+                        ? ((selectedClaim as any).processedBy || 'Processed (Accounts)') 
+                        : 'Awaiting Accounts'}
+                    </p>
+                  </div>
+                  <div className={`p-2 rounded border ${
+                    (selectedClaim as any).paymentRelease === 'Yes' || selectedClaim.status === 'Released'
+                      ? 'bg-purple-50 border-purple-200 text-purple-800 font-medium' 
+                      : 'bg-slate-50 border-slate-250 text-slate-500'
+                  }`}>
+                    <p className="font-bold text-slate-900 border-b border-slate-100 pb-0.5 mb-1 text-[10.5px]">3. Payment Release</p>
+                    <p className="text-[9px] leading-tight text-slate-600">
+                      {(selectedClaim as any).paymentRelease === 'Yes' 
+                        ? ((selectedClaim as any).releasedBy || 'Released (Paid)') 
+                        : 'Awaiting Release'}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Administrative Remarks / Action Reason (Sent to claimant)</label>
+                  <textarea 
+                    rows={2}
+                    value={remarksState}
+                    onChange={(e) => setRemarksState(e.target.value)}
+                    placeholder="Enter approval details, accounts instructions, or rejection reasons..."
+                    className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-xs text-slate-950 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100 font-semibold text-xs">
+                  {selectedClaim.status === 'Pending' && (
+                    <>
+                      <button 
+                        id="reject_claim_btn"
+                        onClick={() => handleAdminAction('Rejected')}
+                        disabled={actionStatus.type === 'updating'}
+                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-250 font-bold py-2.5 rounded-lg text-xs shadow-sm transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <XCircle className="h-4 w-4 text-rose-500" />
+                        Reject Expense & Email
+                      </button>
+                      <button 
+                        id="approve_claim_btn"
+                        onClick={() => handleAdminAction('Approved')}
+                        disabled={actionStatus.type === 'updating'}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-xs shadow transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        Approve Expense & Email
+                      </button>
+                    </>
+                  )}
+
+                  {selectedClaim.status === 'Approved' && (
+                    <>
+                      <button 
+                        id="reject_claim_btn"
+                        onClick={() => handleAdminAction('Rejected')}
+                        disabled={actionStatus.type === 'updating'}
+                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-250 font-bold py-2.5 rounded-lg text-xs shadow-sm transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <XCircle className="h-4 w-4 text-rose-500" />
+                        Reject / Revert
+                      </button>
+                      <button 
+                        id="process_payment_btn"
+                        onClick={() => handleAdminAction('Processed')}
+                        disabled={actionStatus.type === 'updating'}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg text-xs shadow transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Send className="h-4 w-4" />
+                        Process Payment (Email Accounts)
+                      </button>
+                    </>
+                  )}
+
+                  {selectedClaim.status === 'Processed' && (
+                    <>
+                      <button 
+                        id="reject_claim_btn"
+                        onClick={() => handleAdminAction('Rejected')}
+                        disabled={actionStatus.type === 'updating'}
+                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-250 font-bold py-2.5 rounded-lg text-xs shadow-sm transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <XCircle className="h-4 w-4 text-rose-500" />
+                        Cancel / Reject
+                      </button>
+                      <button 
+                        id="release_payment_btn"
+                        onClick={() => handleAdminAction('Released')}
+                        disabled={actionStatus.type === 'updating'}
+                        className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-lg text-xs shadow transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Check className="h-4 w-4" />
+                        Release Payment (Email Claimant)
+                      </button>
+                    </>
+                  )}
+
+                  {(selectedClaim.status === 'Released' || selectedClaim.status === 'Rejected') && (
+                    <div className="col-span-2 text-center py-2 px-4 rounded bg-slate-100 border border-slate-200 text-slate-600 text-xs font-semibold">
+                      This transaction has been finalized as <span className="font-bold text-slate-800 underline">{selectedClaim.status}</span>. No further action is required.
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Simple Footer footer matches corporate look */}
+      <footer className="bg-slate-900 border-t border-slate-800 text-slate-400 py-6 px-4 text-center text-xs mt-12">
+        <div className="max-w-7xl mx-auto space-y-1.5 font-mono">
+          <p>&copy; 2026 Ginza Industries Limited &bull; Confidential &bull; All Rights Reserved</p>
+          <p className="text-[10px] text-slate-500">Google Sheets Dashboard Connection Status: Connected &bull; SMTP Mail Relay: Connected</p>
         </div>
       </footer>
+
     </div>
-  );
-}
-
-function AdminActionDialog({ claim, onAction, group, predefinedAdmin }: { claim: Claim, onAction: (a: string, d?: any) => void, group: Claim[], predefinedAdmin?: { name: string; email: string } }) {
-  const [remark, setRemark] = useState(claim.adminremark || '');
-  const [email, setEmail] = useState(claim.employeeemail || '');
-  const [adminName, setAdminName] = useState(predefinedAdmin?.name || 'Expense Admin');
-  const [adminEmail, setAdminEmail] = useState(predefinedAdmin?.email || '');
-
-  // Update when predefined admin changes
-  useEffect(() => {
-    if (predefinedAdmin?.name) setAdminName(predefinedAdmin.name);
-    if (predefinedAdmin?.email) setAdminEmail(predefinedAdmin.email);
-  }, [predefinedAdmin]);
-
-  // Update email if claim changes
-  useEffect(() => {
-    setEmail(claim.employeeemail || '');
-  }, [claim.employeeemail]);
-
-  // Look up branch head email from constants
-  const branchInfo = BRANCH_DATA.find(b => b.name === claim.branchname);
-  const branchHeadEmail = branchInfo?.headEmail || '';
-
-  const getActionData = (extra?: any) => ({
-    remark,
-    employeeemail: email,
-    branchheademail: branchHeadEmail,
-    adminName,
-    adminEmail,
-    grandtotal: claim.grandtotal,
-    salespersonname: claim.salespersonname,
-    branchname: claim.branchname,
-    ...extra
-  });
-
-  return (
-    <Dialog>
-      <DialogTrigger
-        render={
-          <button className="inline-flex items-center justify-center rounded-md text-[10px] font-black uppercase border-2 border-[#141414] bg-white hover:bg-[#141414] hover:text-white h-8 px-4 transition-all shadow-[2px_2px_0px_0px_rgba(20,20,20,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none">
-            Manage <ChevronRight className="w-3 h-3 ml-1" />
-          </button>
-        }
-      />
-      <DialogContent className="max-w-4xl w-[95vw] max-h-[92vh] flex flex-col border-3 border-[#141414] shadow-[12px_12px_0px_rgba(20,20,20,1)] p-0 bg-white overflow-hidden">
-        <div className="bg-[#141414] text-white p-4 flex justify-between items-center border-b-2 border-[#141414]">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-green-400" />
-            <div>
-              <h2 className="text-sm font-black uppercase tracking-wider leading-none">Administrative Review Portal</h2>
-              <p className="text-[10px] text-slate-400 font-mono mt-0.5 uppercase">ID: {claim.submissionid}</p>
-            </div>
-          </div>
-          <Badge className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-[9px] uppercase px-2.5 py-0.5 tracking-wider font-mono">
-            {claim.branchname}
-          </Badge>
-        </div>
-
-        <div className="p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar">
-          {/* Header Card / Identity */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-slate-50 p-4 border-2 border-[#141414] rounded-xl shadow-[4px_4px_0px_rgba(20,20,20,0.05)]">
-            <div className="md:col-span-7 space-y-2">
-              <span className="text-[8px] font-black uppercase tracking-widest bg-blue-100 text-blue-800 px-2 py-0.5 rounded-sm">Claimant Employee Details</span>
-              <h3 className="text-xl font-black uppercase tracking-tight text-[#141414] leading-none pt-1">
-                {claim.salespersonname}
-              </h3>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs">
-                <span className="flex items-center gap-1.5 font-bold text-slate-700">
-                  <Mail className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                  <span className="underline">{claim.employeeemail || 'No Email Found'}</span>
-                </span>
-                <span className="opacity-40 hidden sm:block">|</span>
-                <span className="text-slate-500 font-mono text-[11px]">
-                  Submitted on: {claim.timestamp}
-                </span>
-              </div>
-            </div>
-            <div className="md:col-span-5 flex items-center md:justify-end">
-              <div className="bg-yellow-50 border-2 border-yellow-400 p-3 rounded-lg shadow-[3px_3px_0px_rgba(161,98,7,0.15)] w-full md:w-auto">
-                <span className="text-[8px] font-black uppercase opacity-60 block tracking-wider leading-none mb-1">Active Administrator</span>
-                <div className="text-[11px] font-black text-[#141414] uppercase leading-snug">{adminName}</div>
-                <div className="text-[9px] opacity-70 font-mono leading-none mt-0.5">{adminEmail}</div>
-                <p className="text-[8px] mt-1.5 text-yellow-800 font-medium leading-none italic">* Outbox route replies directly to {adminEmail}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">
-            {/* Left Column: Breakdown details */}
-            <div className="lg:col-span-7 space-y-4">
-              {/* Category summary banner */}
-              <div>
-                <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Summary by Category</span>
-                <div className="grid grid-cols-2 gap-2 text-[10px]">
-                  {Object.entries(group.reduce((acc: any, item) => {
-                    acc[item.expensecategory] = (acc[item.expensecategory] || 0) + Number(item.amount);
-                    return acc;
-                  }, {})).map(([cat, amt]: any) => (
-                    <div key={cat} className="bg-slate-50/80 border border-slate-200 rounded p-2 flex justify-between items-center">
-                      <span className="font-bold opacity-75 uppercase">{cat}:</span>
-                      <span className="font-black text-blue-950 text-xs">₹{amt}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Itemized Items */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between border-b-2 border-[#141414] pb-1">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-[#141414]">
-                    Itemized Breakdown ({group.length} {group.length === 1 ? 'item' : 'items'})
-                  </span>
-                  <div className="bg-[#141414] text-white text-xs px-2.5 py-0.5 rounded font-black">
-                    Grand Total: ₹{claim.grandtotal}
-                  </div>
-                </div>
-                
-                <div className="max-h-[350px] overflow-y-auto pr-2 space-y-3 custom-scrollbar">
-                  {group.map((item, idx) => (
-                    <div key={idx} className="bg-white border-2 border-[#141414] rounded-lg p-3 hover:bg-slate-50/50 transition-all shadow-[2px_2px_0px_rgba(20,20,20,1)] hover:translate-y-[-1px]">
-                      <div className="flex justify-between items-start gap-3">
-                        <div className="flex-1 space-y-1.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge className="text-[8px] font-bold uppercase bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0 rounded h-4">
-                              {item.expensecategory}
-                            </Badge>
-                            <span className="text-[9px] text-slate-500 font-mono">
-                              Date: {item.itemdate}
-                            </span>
-                          </div>
-                          
-                          <div className="text-xs text-[#141414] font-bold flex items-center gap-1">
-                            <span className="text-blue-700">Route:</span>
-                            <span>{item.fromlocation} {item.tolocation ? `→ ${item.tolocation}` : '(Local)'}</span>
-                          </div>
-
-                          {item.itemremark && (
-                            <div className="text-[10px] p-2 bg-slate-50 border border-dashed border-slate-200 rounded font-serif italic text-slate-600">
-                              "{item.itemremark}"
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="text-right flex flex-col items-end justify-between self-stretch shrink-0">
-                          <div className="text-sm font-black text-blue-950 font-mono bg-blue-50/70 border border-blue-100 rounded px-2 py-0.5">
-                            ₹{item.amount}
-                          </div>
-                          {item.attachmentlink && item.attachmentlink !== "Upload Failed" && (
-                            <a 
-                              href={item.attachmentlink} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="inline-flex items-center gap-1 text-[8px] font-black text-blue-600 hover:text-white bg-blue-50 hover:bg-blue-600 px-2 h-6 rounded-md border-2 border-blue-600 transition-colors uppercase mt-3"
-                            >
-                              <FileText className="w-2.5 h-2.5" /> View Bill
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Interactive admin actions */}
-            <div className="lg:col-span-5 space-y-4">
-              {/* Mail target recipient Profile Card */}
-              <div className="bg-blue-50/80 border-2 border-blue-200 p-4 rounded-xl space-y-3 relative overflow-hidden">
-                <div className="flex items-center justify-between border-b border-blue-200/50 pb-2">
-                  <span className="text-[9px] font-black uppercase text-blue-900 tracking-wider">Mail Output Routing</span>
-                  <Badge className="bg-blue-600 text-white text-[7px] font-bold uppercase tracking-widest px-1.5 py-0 h-4">Verified</Badge>
-                </div>
-                
-                <div className="space-y-2.5">
-                  <Label className="text-[10px] font-bold uppercase text-blue-900/80 block">Recipient (Claim Holder Email)</Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-3 h-3.5 w-3.5 text-blue-500" />
-                    <Input 
-                      value={email} 
-                      onChange={e => setEmail(e.target.value)} 
-                      className="h-9 text-xs pl-8 border-blue-200 bg-white font-bold text-blue-950 focus:border-blue-500 transition-all border-2" 
-                    />
-                  </div>
-                  <div className="bg-white/70 p-2.5 rounded border border-dashed border-blue-200 text-[9px] text-blue-700 leading-relaxed">
-                    <p>SYSTEM ACTION: Admin updates triggers automatic SMTP emails using the claimant email <b>{email || 'None'}</b> to inform claimant.</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Remark Area */}
-              <div className="bg-slate-50 border-2 border-[#141414] p-4 rounded-xl space-y-3 shadow-[4px_4px_0px_rgba(20,20,20,0.05)]">
-                <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                  <span className="bg-[#141414] text-white px-1.5 py-0.5 rounded font-mono text-[8px] font-bold">REMARK</span>
-                  <Label className="text-[10px] font-black uppercase text-[#141414] tracking-wider">Official Query / Comments</Label>
-                </div>
-                <Textarea 
-                  placeholder="Type an official administrative query or feedback for the claimant..." 
-                  value={remark} 
-                  onChange={e => setRemark(e.target.value)}
-                  className="border-slate-300 min-h-[90px] text-xs resize-none bg-white focus:border-[#141414] transition-all"
-                />
-                <Button 
-                  className="w-full bg-[#141414] hover:bg-blue-600 text-white text-[10px] h-9 font-black uppercase tracking-widest shadow-[4px_4px_0px_0px_rgba(20,20,20,0.15)] active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
-                  disabled={!remark || !email}
-                  onClick={() => onAction('REMARK', getActionData())}
-                >
-                  <Send className="w-3 h-3 mr-2" /> Dispatch Remark Email
-                </Button>
-              </div>
-            </div>
-
-            {/* Action sequence Controls */}
-            <div className="col-span-full mt-2">
-              <div className="bg-white border-3 border-[#141414] rounded-2xl p-5 shadow-[6px_6px_0px_0px_rgba(20,20,20,1)]">
-                <div className="flex items-center justify-between border-b pb-3 mb-4">
-                  <h3 className="text-xs font-black uppercase tracking-wider flex items-center gap-2 text-[#141414]">
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse" />
-                    Expense Processing Control block
-                  </h3>
-                  <Badge variant="outline" className="border-slate-300 font-mono text-[8px] px-2 uppercase">Seq-State-Sync</Badge>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                  <Button 
-                    variant="outline" 
-                    className={`flex-col h-auto py-4 border-2 border-[#141414] transition-all group ${
-                      claim.approved === 'Yes' 
-                        ? 'bg-slate-100 opacity-50 grayscale cursor-not-allowed' 
-                        : 'bg-green-50 hover:bg-green-100 shadow-[4px_4px_0px_0px_rgba(22,163,74,1)] active:shadow-none hover:-translate-y-0.5'
-                    }`}
-                    onClick={() => onAction('APPROVE', getActionData())}
-                    disabled={claim.approved === 'Yes'}
-                  >
-                    <ShieldCheck className={`w-7 h-7 mb-1 ${claim.approved === 'Yes' ? 'text-slate-400' : 'text-green-600 group-hover:scale-105 transition-transform'}`} />
-                    <span className="text-[9px] font-black uppercase text-center leading-tight">Step 01<br/>Approve Claim</span>
-                  </Button>
-
-                  <Button 
-                    variant="outline" 
-                    className={`flex-col h-auto py-4 border-2 border-[#141414] transition-all group ${
-                      claim.approved !== 'Yes' || claim.paymentprocess === 'Yes'
-                        ? 'bg-slate-100 opacity-50 grayscale cursor-not-allowed' 
-                        : 'bg-blue-50 hover:bg-blue-100 shadow-[4px_4px_0px_0px_rgba(37,99,235,1)] active:shadow-none hover:-translate-y-0.5'
-                    }`}
-                    onClick={() => onAction('PROCESS', getActionData())}
-                    disabled={claim.approved !== 'Yes' || claim.paymentprocess === 'Yes'}
-                  >
-                    <CreditCard className={`w-7 h-7 mb-1 ${claim.approved !== 'Yes' || claim.paymentprocess === 'Yes' ? 'text-slate-400' : 'text-blue-600 group-hover:scale-105 transition-transform'}`} />
-                    <span className="text-[9px] font-black uppercase text-center leading-tight">Step 02<br/>Process Payment</span>
-                  </Button>
-
-                  <Button 
-                    variant="outline" 
-                    className={`flex-col h-auto py-4 border-2 border-[#141414] transition-all group ${
-                      claim.paymentprocess !== 'Yes' || claim.paymentrelease === 'Yes'
-                        ? 'bg-slate-100 opacity-50 grayscale cursor-not-allowed' 
-                        : 'bg-purple-50 hover:bg-purple-100 shadow-[4px_4px_0px_0px_rgba(147,51,234,1)] active:shadow-none hover:-translate-y-0.5'
-                    }`}
-                    onClick={() => onAction('RELEASE', getActionData())}
-                    disabled={claim.paymentprocess !== 'Yes' || claim.paymentrelease === 'Yes'}
-                  >
-                    <CheckCircle2 className={`w-7 h-7 mb-1 ${claim.paymentprocess !== 'Yes' || claim.paymentrelease === 'Yes' ? 'text-slate-400' : 'text-purple-600 group-hover:scale-105 transition-transform'}`} />
-                    <span className="text-[9px] font-black uppercase text-center leading-tight">Step 03<br/>Final Release</span>
-                  </Button>
-                  
-                  <div className="flex flex-col justify-center items-center py-4 px-4 bg-slate-900 text-white rounded-xl border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,0.3)]">
-                    <span className="text-[8px] font-bold opacity-50 uppercase tracking-[0.15em] mb-1">Status State</span>
-                    <div className="flex items-center gap-1.5">
-                       <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                       <span className="text-xs font-black uppercase tracking-tight font-mono">
-                        {claim.paymentrelease === 'Yes' ? 'Settled' : 
-                         claim.paymentprocess === 'Yes' ? 'Processed' :
-                         claim.approved === 'Yes' ? 'Approved' : 'Pending'}
-                      </span>
-                    </div>
-                    {claim.approved === 'Yes' && (
-                      <p className="text-[7px] text-zinc-400 uppercase mt-1 text-center truncate select-none leading-none max-w-full font-mono">
-                        {claim.approvedtimestamp?.split(' - ')[0] || 'Approved'}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
