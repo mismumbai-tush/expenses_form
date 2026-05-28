@@ -505,7 +505,7 @@ const getDriveClient = async () => {
   return google.drive({ version: "v3", auth: auth as any });
 };
 
-const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1L6iVHvBuknqum6lFf26BAp1_wrEwyyqwnj5o3lznCZ4";
+const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1chWoPA4oh7Ss2Xy2jZmUCTDRnmcbDU8L4ojsy46mJh8";
 const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
 const HEADERS = [
@@ -735,10 +735,11 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    if (lowerEmail === "mis.mumbai@ginzalimited.com" && (password === "admin" || password === "admin123")) {
+    if ((lowerEmail === "mis.mumbai@ginzalimited.com" || lowerEmail === "arvind.sethia@ginzalimited.com" || lowerEmail === "rohit.sethia@ginzalimited.com") && (password === "admin" || password === "admin123")) {
+      const displayName = lowerEmail === "mis.mumbai@ginzalimited.com" ? "Mumbai Admin" : lowerEmail.split("@")[0].replace(/\./g, " ").toUpperCase();
       return res.json({
         success: true,
-        user: { name: "Mumbai Admin", email: "mis.mumbai@ginzalimited.com" }
+        user: { name: displayName, email: lowerEmail }
       });
     }
 
@@ -993,8 +994,14 @@ app.post("/api/claim", async (req, res) => {
 
     // Notify Admins & Branch Head (Safe SMTP routing)
     try {
-      const adminEmailsRaw = process.env.ADMIN_EMAILS || "mis.mumbai@ginzalimited.com";
+      const adminEmailsRaw = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
       const adminsList = adminEmailsRaw.split(",").map(e => e.trim()).filter(Boolean);
+      if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
+        adminsList.push("arvind.sethia@ginzalimited.com");
+      }
+      if (!adminsList.includes("rohit.sethia@ginzalimited.com")) {
+        adminsList.push("rohit.sethia@ginzalimited.com");
+      }
       if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
         adminsList.push("mis.mumbai@ginzalimited.com");
       }
@@ -1006,7 +1013,7 @@ app.post("/api/claim", async (req, res) => {
 
       await sendMail(
         recipients,
-        "",
+        "ea.mumbai@ginzalimited.com,mis.mumbai@ginzalimited.com",
         emailSubject,
         emailBody,
         salespersonName,
@@ -1514,8 +1521,14 @@ app.post("/api/claims", async (req, res) => {
 
     // Email Dispatch
     try {
-      const adminEmailsRaw = process.env.ADMIN_EMAILS || "mis.mumbai@ginzalimited.com";
+      const adminEmailsRaw = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
       const adminsList = adminEmailsRaw.split(",").map(e => e.trim()).filter(Boolean);
+      if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
+        adminsList.push("arvind.sethia@ginzalimited.com");
+      }
+      if (!adminsList.includes("rohit.sethia@ginzalimited.com")) {
+        adminsList.push("rohit.sethia@ginzalimited.com");
+      }
       if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
         adminsList.push("mis.mumbai@ginzalimited.com");
       }
@@ -1527,7 +1540,7 @@ app.post("/api/claims", async (req, res) => {
 
       await sendMail(
         recipients,
-        "",
+        "ea.mumbai@ginzalimited.com,mis.mumbai@ginzalimited.com",
         emailSubject,
         emailBody,
         claimantName,
@@ -1769,8 +1782,14 @@ app.post("/api/claims/action", async (req, res) => {
       const targetClaimant = claimantEmail || "";
       const bHeadEmail = claim ? claim.branchheademail : "";
       
-      const adminEmailsStr = process.env.ADMIN_EMAILS || "mis.mumbai@ginzalimited.com";
+      const adminEmailsStr = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
       const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(Boolean);
+      if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
+        adminsList.push("arvind.sethia@ginzalimited.com");
+      }
+      if (!adminsList.includes("rohit.sethia@ginzalimited.com")) {
+        adminsList.push("rohit.sethia@ginzalimited.com");
+      }
       if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
         adminsList.push("mis.mumbai@ginzalimited.com");
       }
@@ -2110,8 +2129,14 @@ app.post("/api/admin/action", async (req, res) => {
       const gTotal = claim ? claim.grandtotal : (data?.grandtotal || "0");
       const bHeadEmail = claim ? claim.branchheademail : (data?.branchheademail || "");
       
-      const adminEmailsStr = process.env.ADMIN_EMAILS || "mis.mumbai@ginzalimited.com";
+      const adminEmailsStr = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
       const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(Boolean);
+      if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
+        adminsList.push("arvind.sethia@ginzalimited.com");
+      }
+      if (!adminsList.includes("rohit.sethia@ginzalimited.com")) {
+        adminsList.push("rohit.sethia@ginzalimited.com");
+      }
       if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
         adminsList.push("mis.mumbai@ginzalimited.com");
       }
