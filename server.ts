@@ -1009,7 +1009,7 @@ app.post("/api/claim", async (req, res) => {
       const recipients = branchHeadEmail ? `${adminEmails},${branchHeadEmail}` : adminEmails;
       
       const emailSubject = `New Claim Submitted - ${salespersonName} (${branchName})`;
-      const emailBody = `Dear Admin,\n\nA new expense claim has been successfully submitted by ${salespersonName}.\n\n--- Claimant Information ---\nName: ${salespersonName}\nEmail: ${salespersonEmail}\nBranch: ${branchName}\nSubmission ID: ${submissionId}\nTotal Amount: ₹${grandTotal}\nTotal Items: ${items.length}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
+      const emailBody = `Dear Admin,\n\nA new expense claim has been successfully submitted by ${salespersonName}.\n\n--- Claimant Information ---\nName: ${salespersonName}\nEmail: ${salespersonEmail}\nBranch: ${branchName}\nSubmission ID: ${submissionId}\nTotal Amount: ₹${grandTotal}\nTotal Items: ${items.length}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nApplication Portal:\nhttps://expenses-form-one.vercel.app/\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
 
       await sendMail(
         recipients,
@@ -1536,7 +1536,7 @@ app.post("/api/claims", async (req, res) => {
       const recipients = branchHeadEmail ? `${adminEmails},${branchHeadEmail}` : adminEmails;
       
       const emailSubject = `New Claim Submitted - ${claimantName} (${branch})`;
-      const emailBody = `Dear Admin,\n\nA new expense claim of ₹${amount} has been successfully submitted by ${claimantName}.\n\n--- Claimant Information ---\nName: ${claimantName}\nEmail: ${claimantEmail}\nBranch: ${branch}\nSubmission ID: ${submissionId}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
+      const emailBody = `Dear Admin,\n\nA new expense claim of ₹${amount} has been successfully submitted by ${claimantName}.\n\n--- Claimant Information ---\nName: ${claimantName}\nEmail: ${claimantEmail}\nBranch: ${branch}\nSubmission ID: ${submissionId}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nApplication Portal:\nhttps://expenses-form-one.vercel.app/\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
 
       await sendMail(
         recipients,
@@ -1819,7 +1819,7 @@ app.post("/api/claims/action", async (req, res) => {
       const accountsMail = BRANCH_EMAILS[claimBranch] || "cash.udhna@ginzalimited.com";
 
       if (action === "REMARK") {
-        const mailBody = `Dear ${employeeName},\n\nYour claims submission with ID: ${id} (₹${amount}) was Rejected / Remarked by Admin:\n\n"${mappedComment}"\n\nPlease check the portal to update your transactions logs.\n\nThank you,\nExpense Department`;
+        const mailBody = `Dear ${employeeName},\n\nYour claims submission with ID: ${id} (₹${amount}) was Rejected / Remarked by Admin:\n\n"${mappedComment}"\n\nPlease check the portal to update your transactions logs:\nhttps://expenses-form-one.vercel.app/\n\nThank you,\nExpense Department`;
         await sendMail(
           targetClaimant,
           `${adminEmails},${bHeadEmail}`,
@@ -1830,7 +1830,7 @@ app.post("/api/claims/action", async (req, res) => {
         );
       } else if (action === "APPROVE") {
         const remarkString = mappedComment && mappedComment !== "Approved" ? `\n\nAdministrative Remarks:\n"${mappedComment}"` : "";
-        const mailBody = `Dear ${employeeName},\n\nYour claims submission with ID: ${id} of ₹${amount} was APPROVED successfully by Admin.${remarkString}\n\nApproved Date: ${timestamp}\n\nThank you,\nExpense Department`;
+        const mailBody = `Dear ${employeeName},\n\nYour claims submission with ID: ${id} of ₹${amount} was APPROVED successfully by Admin.${remarkString}\n\nApproved Date: ${timestamp}\n\nPortal Link: https://expenses-form-one.vercel.app/\n\nThank you,\nExpense Department`;
         await sendMail(
           targetClaimant,
           `${adminEmails},${bHeadEmail}`,
@@ -1890,6 +1890,8 @@ app.post("/api/claims/action", async (req, res) => {
 
     ${attachmentHtml}
 
+    <p style="margin-top: 15px;"><strong>Expense Claim Portal:</strong> <a href="https://expenses-form-one.vercel.app/" style="color: #2563eb; text-decoration: underline;" target="_blank">Access Claim Portal</a></p>
+
     <div style="margin-top: 24px; padding: 12px; border-left: 4px solid #3b82f6; background-color: #f0f9ff; font-size: 13px; color: #1e40af;">
       <strong>Actioned By:</strong> ${adminName}<br/>
       <strong>Admin Status:</strong> Approved & forwarded to accounts for processing.<br/>
@@ -1937,6 +1939,8 @@ app.post("/api/claims/action", async (req, res) => {
         <td style="text-align: left; padding: 12px 8px; font-size: 18px; font-weight: 800; color: #059669;">₹${Number(amount).toLocaleString('en-IN')}</td>
       </tr>
     </table>
+
+    <p style="margin-top: 15px;"><strong>View Claim on Portal:</strong> <a href="https://expenses-form-one.vercel.app/" style="color: #10b981; text-decoration: underline;" target="_blank">Access Claim Portal</a></p>
 
     <div style="margin-top: 24px; padding: 12px; border-left: 4px solid #10b981; background-color: #f0fdf4; font-size: 13px; color: #065f46;">
       <strong>Status:</strong> Released / Paid<br/>
@@ -2159,7 +2163,7 @@ app.post("/api/admin/action", async (req, res) => {
           sEmail, 
           `${adminEmails},${bHeadEmail}`, 
           `Action Required: Expense Claim Update (${claimId})`, 
-          `Dear ${sName},\n\nAdmin (${adminName}) has left a remark regarding your claim:\n\n"${data.remark}"\n\nPlease check and respond in the portal.\n\nThank you,\nExpense Department`,
+          `Dear ${sName},\n\nAdmin (${adminName}) has left a remark regarding your claim:\n\n"${data.remark}"\n\nPlease check and respond in the portal:\nhttps://expenses-form-one.vercel.app/\n\nThank you,\nExpense Department`,
           adminName,
           adminEmail
         );
@@ -2169,7 +2173,7 @@ app.post("/api/admin/action", async (req, res) => {
           sEmail,
           `${adminEmails},${bHeadEmail}`,
           `Claim Approved: ${claimId}`,
-          `Dear ${sName},\n\nWe are pleased to inform you that your expense claim of ₹${gTotal} has been APPROVED by ${adminName} and has been forwarded for payment processing.\n\nSubmission ID: ${claimId}\nDate: ${timestamp}`,
+          `Dear ${sName},\n\nWe are pleased to inform you that your expense claim of ₹${gTotal} has been APPROVED by ${adminName} and has been forwarded for payment processing.\n\nSubmission ID: ${claimId}\nDate: ${timestamp}\n\nPortal Link: https://expenses-form-one.vercel.app/`,
           adminName,
           adminEmail
         );
@@ -2179,7 +2183,7 @@ app.post("/api/admin/action", async (req, res) => {
           accountsMail,
           `${sEmail},${bHeadEmail},${adminEmails}`,
           `PAYMENT PROCESSING REQUEST: ${sName}`,
-          `Dear Accounts Department,\n\nPlease release the payment for the following approved claim:\n\nEmployee: ${sName}\nBranch: ${bName}\nAmount: ₹${gTotal}\nSubmission ID: ${claimId}\n\nApproved By: ${adminName}\nTimestamp: ${timestamp}`,
+          `Dear Accounts Department,\n\nPlease release the payment for the following approved claim:\n\nEmployee: ${sName}\nBranch: ${bName}\nAmount: ₹${gTotal}\nSubmission ID: ${claimId}\n\nApproved By: ${adminName}\nTimestamp: ${timestamp}\n\nPortal Link: https://expenses-form-one.vercel.app/`,
           adminName,
           adminEmail
         );
@@ -2189,7 +2193,7 @@ app.post("/api/admin/action", async (req, res) => {
           sEmail,
           `${adminEmails},${bHeadEmail}`,
           `PAYMENT RELEASED: ${claimId}`,
-          `Dear ${sName},\n\nWe are pleased to inform you that your expense claim payment of ₹${gTotal} has been released.\n\nTransaction processed by: ${adminName}\nDate: ${timestamp}`,
+          `Dear ${sName},\n\nWe are pleased to inform you that your expense claim payment of ₹${gTotal} has been released.\n\nTransaction processed by: ${adminName}\nDate: ${timestamp}\n\nPortal Link: https://expenses-form-one.vercel.app/`,
           adminName,
           adminEmail
         );

@@ -1344,7 +1344,7 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="p-6 space-y-4">
+              <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
                 
                 {actionStatus.type !== 'idle' && (
                   <div className={`p-3 rounded text-xs flex items-center gap-2 border ${
