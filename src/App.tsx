@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BRANCHES, CATEGORIES } from './constants';
 import { Claim, Salesperson, Branch } from './types';
 import { 
@@ -18,7 +18,8 @@ import {
   LogOut,
   AlertCircle,
   Send,
-  Check
+  Check,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -45,6 +46,9 @@ export default function App() {
     category: string;
     claimDate: string;
     description: string;
+    fileName?: string;
+    fileBase64?: string;
+    fileType?: string;
   }>>([
     {
       id: "line_1",
@@ -54,7 +58,10 @@ export default function App() {
       amount: '',
       category: '',
       claimDate: new Date().toISOString().split('T')[0],
-      description: ''
+      description: '',
+      fileName: '',
+      fileBase64: '',
+      fileType: ''
     }
   ]);
 
@@ -70,7 +77,10 @@ export default function App() {
         amount: '',
         category: '',
         claimDate: new Date().toISOString().split('T')[0],
-        description: ''
+        description: '',
+        fileName: '',
+        fileBase64: '',
+        fileType: ''
       }
     ]);
   };
@@ -91,14 +101,6 @@ export default function App() {
     }));
   };
   
-  // attachment info
-  const [file, setFile] = useState<File | null>(null);
-  const [fileBase64, setFileBase64] = useState<string>('');
-  const [fileName, setFileName] = useState('');
-  const [dragging, setDragging] = useState(false);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   // status notifications
   const [formStatus, setFormStatus] = useState<{ type: 'idle' | 'submitting' | 'success' | 'error'; message: string }>({
     type: 'idle',
@@ -118,6 +120,10 @@ export default function App() {
     type: 'idle',
     message: ''
   });
+  
+  // Custom confirmation for deletion to avoid iframe sandbox blocked prompts
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteSidebarConfirm, setDeleteSidebarConfirm] = useState(false);
 
   // Admin filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -159,44 +165,6 @@ export default function App() {
     }
   }, [selectedSalesperson]);
 
-  // Handle Receipt Upload Drag & Drop
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setDragging(false);
-  };
-
-  const handleFileConvert = (selectedFile: File) => {
-    setFile(selectedFile);
-    setFileName(selectedFile.name);
-
-    const reader = new FileReader();
-    reader.readAsDataURL(selectedFile);
-    reader.onload = () => {
-      setFileBase64(reader.result as string);
-    };
-    reader.onerror = (error) => {
-      console.error("FileReader Error: ", error);
-    };
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileConvert(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileConvert(e.target.files[0]);
-    }
-  };
-
   // Submit Claim
   const handleSubmitClaim = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,72 +200,72 @@ export default function App() {
     setFormStatus({ type: 'submitting', message: `Filing ${expenseLines.length} claim logs to Google Sheets & Drive...` });
 
     try {
-      const successfulIds: string[] = [];
-      
-      for (let i = 0; i < expenseLines.length; i++) {
-        const line = expenseLines[i];
+      const totalAmount = expenseLines.reduce((acc, line) => acc + (Number(line.amount) || 0), 0);
+
+      const itemsPayload = expenseLines.map((line) => {
         const submissionTitle = line.category === 'Travel'
           ? `Travel from ${line.origin?.trim()} to ${line.destination?.trim()}`
           : line.title;
-
-        setFormStatus({ 
-          type: 'submitting', 
-          message: `Filing Item #${i + 1} of ${expenseLines.length}: "${submissionTitle}" (₹${line.amount})...` 
-        });
-
-        const response = await fetch('/api/claims', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            claimDate: line.claimDate,
-            claimantName,
-            claimantEmail,
-            title: submissionTitle,
-            amount: line.amount,
-            category: line.category,
-            branch: selectedBranch.name,
-            description: line.description,
-            fileBase64,
-            fileName,
-            branchHeadEmail: selectedBranch.headEmail
-          })
-        });
-
-        const resData = await response.json();
-        if (resData.success) {
-          successfulIds.push(resData.claim.id);
-        } else {
-          throw new Error(resData.error || `Server failed to process Item #${i + 1}`);
-        }
-      }
-
-      setFormStatus({ 
-        type: 'success', 
-        message: `Successfully registered ${successfulIds.length} expense claims! (IDs: ${successfulIds.join(', ')})` 
+          
+        return {
+          category: line.category,
+          itemDate: line.claimDate,
+          fromLoc: line.category === 'Travel' ? line.origin : '',
+          toLoc: line.category === 'Travel' ? line.destination : '',
+          amount: String(line.amount),
+          remark: line.category === 'Travel' ? submissionTitle : (line.description || submissionTitle),
+          // Attach file base64 data directly from this row item
+          fileData: line.fileBase64 || null,
+          fileName: line.fileName || null,
+          fileType: line.fileType || 'application/octet-stream'
+        };
       });
-      
-      // Reset inputs
-      setExpenseLines([
-        {
-          id: "line_1",
-          title: '',
-          origin: '',
-          destination: '',
-          amount: '',
-          category: '',
-          claimDate: new Date().toISOString().split('T')[0],
-          description: ''
-        }
-      ]);
-      setFile(null);
-      setFileBase64('');
-      setFileName('');
-      setSelectedSalesperson('custom');
-      
-      // Reload table logs
-      fetchClaims();
+
+      const response = await fetch('/api/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          branchName: selectedBranch.name,
+          salespersonName: claimantName,
+          salespersonEmail: claimantEmail,
+          items: itemsPayload,
+          grandTotal: String(totalAmount),
+          branchHeadEmail: selectedBranch.headEmail
+        })
+      });
+
+      const resData = await response.json();
+      if (resData.success) {
+        setFormStatus({ 
+          type: 'success', 
+          message: `Successfully registered expense claim! (ID: ${resData.submissionId})` 
+        });
+        
+        // Reset inputs
+        setExpenseLines([
+          {
+            id: "line_1",
+            title: '',
+            origin: '',
+            destination: '',
+            amount: '',
+            category: '',
+            claimDate: new Date().toISOString().split('T')[0],
+            description: '',
+            fileName: '',
+            fileBase64: '',
+            fileType: ''
+          }
+        ]);
+        setSelectedSalesperson('custom');
+        
+        // Reload table logs
+        fetchClaims();
+      } else {
+        throw new Error(resData.error || 'Server failed to process your expense claim');
+      }
     } catch (err: any) {
-      setFormStatus({ type: 'error', message: `One or more claims failed: ${err.message}` });
+      setFormStatus({ type: 'error', message: `Submission failed: ${err.message}` });
     }
   };
 
@@ -343,7 +311,8 @@ export default function App() {
           title: selectedClaim.title,
           amount: selectedClaim.amount,
           rowIndex: (selectedClaim as any).rowIndex,
-          branchName: (selectedClaim as any).sheetName
+          branchName: (selectedClaim as any).sheetName,
+          adminEmail: adminLoggedInEmail
         })
       });
 
@@ -366,19 +335,122 @@ export default function App() {
     }
   };
 
-  // Filters calculation
-  const filteredClaims = claims.filter(c => {
-    const matchesSearch = 
-      c.claimantName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      c.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      c.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      c.claimantEmail.toLowerCase().includes(searchQuery.toLowerCase());
+  // Admin delete claim across Sheets, Supabase, Firestore, and fallback JSON
+  const handleDeleteClaim = async () => {
+    if (!selectedClaim) return;
     
-    const matchesBranch = !branchFilter || c.branch === branchFilter;
-    const matchesStatus = !statusFilter || c.status === statusFilter;
+    // Use state-based inline approval/deletion confirmation to prevent iframe sandbox blockages
+    if (!deleteSidebarConfirm) {
+      setDeleteSidebarConfirm(true);
+      return;
+    }
 
-    return matchesSearch && matchesBranch && matchesStatus;
-  });
+    setActionStatus({ type: 'updating', message: `Permanently deleting claim ${selectedClaim.id}...` });
+    setDeleteSidebarConfirm(false);
+
+    try {
+      const response = await fetch('/api/admin/claims/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          claimId: selectedClaim.id,
+          sheetName: (selectedClaim as any).sheetName || (selectedClaim as any).branch
+        })
+      });
+
+      const resData = await response.json();
+      if (resData.success) {
+        let msg = 'Successfully deleted the claim.';
+        if (resData.sheetsWarning) {
+          msg += ` Note: Google Sheets warning - ${resData.sheetsWarning}. Please ensure your service account has Editor access to the spreadsheet.`;
+        }
+        setActionStatus({ type: 'success', message: msg });
+        setTimeout(() => {
+          setSelectedClaim(null);
+          setRemarksState('');
+          setActionStatus({ type: 'idle', message: '' });
+        }, 3500);
+
+        // Instantly reload claims in UI!
+        fetchClaims();
+      } else {
+        setActionStatus({ type: 'error', message: resData.error || 'Failed to delete claim.' });
+      }
+    } catch (err: any) {
+      setActionStatus({ type: 'error', message: `Server deletion failed: ${err.message}` });
+    }
+  };
+
+  // Group claims by ID to show as single row per submission ID
+  const groupedClaims = React.useMemo(() => {
+    const map: { [key: string]: any } = {};
+    claims.forEach(c => {
+      const id = c.id || "Unknown";
+      if (!map[id]) {
+        map[id] = {
+          id,
+          submitDate: c.submitDate,
+          claimantName: c.claimantName,
+          claimantEmail: c.claimantEmail,
+          branch: c.branch,
+          status: c.status,
+          remarks: c.remarks,
+          rowIndex: c.rowIndex,
+          sheetName: c.sheetName,
+          approved: c.approved,
+          approvedDetails: c.approvedDetails,
+          paymentProcess: c.paymentProcess,
+          processedBy: c.processedBy,
+          paymentRelease: c.paymentRelease,
+          releasedBy: c.releasedBy,
+          items: [],
+          totalAmount: 0
+        };
+      }
+      map[id].items.push({
+        title: c.title,
+        description: c.description,
+        amount: c.amount,
+        category: c.category,
+        claimDate: c.claimDate,
+        attachmentUrl: c.attachmentUrl
+      });
+      map[id].totalAmount += Number(c.amount) || 0;
+    });
+    
+    // Sort grouped claims by submit date descending
+    return Object.values(map).sort((a: any, b: any) => {
+      return new Date(b.submitDate).getTime() - new Date(a.submitDate).getTime();
+    });
+  }, [claims]);
+
+  // Filters calculation on grouped claims
+  const filteredClaims = React.useMemo(() => {
+    return groupedClaims.filter(c => {
+      const matchesSearch = 
+        c.claimantName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+        c.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
+        c.claimantEmail.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.items.some((item: any) => 
+          item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          item.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          item.description.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+      
+      const matchesBranch = !branchFilter || c.branch === branchFilter;
+      
+      let matchesStatus = false;
+      if (!statusFilter) {
+        matchesStatus = true;
+      } else if (statusFilter === "Processed" || statusFilter === "Payment Process On Going") {
+        matchesStatus = c.status === "Processed" || c.status === "Payment Process On Going";
+      } else {
+        matchesStatus = c.status === statusFilter;
+      }
+
+      return matchesSearch && matchesBranch && matchesStatus;
+    });
+  }, [groupedClaims, searchQuery, branchFilter, statusFilter]);
 
 
 
@@ -753,69 +825,67 @@ export default function App() {
                             className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
+
+                        {/* Row item local receipt attachment */}
+                        <div className="pt-2 border-t border-slate-150">
+                          <label className="block text-xs font-bold text-slate-650 mb-1 flex items-center gap-1">
+                            <Upload className="h-3 w-3 text-slate-400" />
+                            Receipt Attachment (Optional for this item)
+                          </label>
+                          
+                          {line.fileName ? (
+                            <div className="flex items-center justify-between p-2 rounded-lg bg-emerald-50 border border-emerald-250 text-xs text-slate-800">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <FileCheck className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                                <span className="font-semibold text-emerald-800 truncate" title={line.fileName}>{line.fileName}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleUpdateLine(line.id, 'fileName', '');
+                                  handleUpdateLine(line.id, 'fileBase64', '');
+                                  handleUpdateLine(line.id, 'fileType', '');
+                                }}
+                                className="text-[10px] font-bold text-rose-500 hover:text-rose-750 bg-white py-0.5 px-2 rounded border border-rose-100 hover:border-rose-300 shadow-sm flex-shrink-0 transition-colors cursor-pointer"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="file"
+                                id={`file_input_${line.id}`}
+                                className="hidden"
+                                accept="image/*,application/pdf"
+                                onChange={(e) => {
+                                  if (e.target.files && e.target.files[0]) {
+                                    const selectedFile = e.target.files[0];
+                                    const reader = new FileReader();
+                                    reader.readAsDataURL(selectedFile);
+                                    reader.onload = () => {
+                                      handleUpdateLine(line.id, 'fileName', selectedFile.name);
+                                      handleUpdateLine(line.id, 'fileBase64', reader.result as string);
+                                      handleUpdateLine(line.id, 'fileType', selectedFile.type);
+                                    };
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  document.getElementById(`file_input_${line.id}`)?.click();
+                                }}
+                                className="w-full px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                              >
+                                <Upload className="h-3 w-3 text-slate-400" />
+                                Browse/Upload Receipt (Img, PDF)
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
-                  </div>
-                </div>
-
-                {/* Section 3: Invoices & Receipts Attachments */}
-                <div className="space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                    <Upload className="h-3.5 w-3.5" />
-                    3. Receipt Attachment (Saved directly to Google Drive)
-                  </h3>
-
-                  <div 
-                    onClick={() => fileInputRef.current?.click()}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
-                      dragging 
-                        ? 'border-blue-500 bg-blue-50 bg-opacity-30' 
-                        : file 
-                        ? 'border-emerald-300 bg-emerald-50 bg-opacity-10' 
-                        : 'border-slate-300 hover:border-slate-400 bg-slate-50'
-                    }`}
-                  >
-                    <input 
-                      type="file" 
-                      ref={fileInputRef}
-                      onChange={handleFileInputChange}
-                      className="hidden" 
-                      accept="image/*,application/pdf"
-                    />
-                    
-                    {file ? (
-                      <div className="space-y-2">
-                        <FileCheck className="h-10 w-10 text-emerald-500 mx-auto" />
-                        <div>
-                          <p className="text-sm font-bold text-slate-800">{fileName}</p>
-                          <p className="text-xs text-slate-500">{(file.size / (1024 * 1024)).toFixed(2)} MB &bull; Selected</p>
-                        </div>
-                        <button 
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setFile(null);
-                            setFileBase64('');
-                            setFileName('');
-                          }}
-                          className="text-xs font-semibold text-rose-500 hover:text-rose-700 bg-white py-1 px-3 rounded-full border border-rose-200 mt-2 shadow-sm"
-                        >
-                          Remove File
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <Upload className="h-10 w-10 text-slate-400 mx-auto" />
-                        <div>
-                          <p className="text-sm font-bold text-slate-800">Drag & Drop Invoice Attachment</p>
-                          <p className="text-xs text-slate-500 mt-0.5">or click here to search local device filesystem</p>
-                        </div>
-                        <p className="text-[10px] text-slate-400">Accepts PNG, JPG, JPEG, and PDF invoice receipts</p>
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -1004,7 +1074,10 @@ export default function App() {
                           <option value="">All Statuses</option>
                           <option value="Pending">Pending</option>
                           <option value="Approved">Approved</option>
+                          <option value="Payment Process On Going">Payment Process On Going</option>
+                          <option value="Released">Released</option>
                           <option value="Rejected">Rejected</option>
+                          <option value="Processed">Processed (Legacy)</option>
                         </select>
                       </div>
                     </div>
@@ -1035,9 +1108,9 @@ export default function App() {
                               <th className="py-3 px-4">Status & Action</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-200 bg-white">
+                           <tbody className="divide-y divide-slate-200 bg-white">
                             {filteredClaims.map((item, idx) => (
-                              <tr key={`${item.id}-${idx}`} className="hover:bg-slate-50">
+                              <tr key={`${item.id}-${idx}`} className="hover:bg-slate-50 border-b border-rose-100/30">
                                 
                                 <td className="py-3.5 px-4 font-bold text-slate-900 font-mono whitespace-nowrap">
                                   {item.id}
@@ -1054,57 +1127,77 @@ export default function App() {
                                 </td>
 
                                 <td className="py-3.5 px-4">
-                                  <div className="max-w-xs space-y-1">
-                                    <p className="font-semibold text-slate-800 leading-snug">{item.title}</p>
-                                    <span className="inline-block text-[10px] font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-100">
-                                      {item.category}
-                                    </span>
-                                    {item.description && (
-                                      <p className="text-[10px] text-slate-550 break-words mt-0.5 max-w-[200px] truncate-3-lines leading-relaxed">{item.description}</p>
-                                    )}
+                                  <div className="max-w-md space-y-2">
+                                    {(item.items || []).map((sub: any, sIdx: number) => (
+                                      <div key={sIdx} className="p-2 rounded bg-slate-50/70 border border-slate-200/60 font-medium space-y-1">
+                                        <div className="flex justify-between items-start gap-1.5">
+                                          <span className="font-bold text-slate-850 leading-tight block">{sub.title || "No Title"}</span>
+                                          <span className="inline-block text-[8px] font-black text-indigo-700 bg-indigo-50 px-1 border border-indigo-150/50 rounded">
+                                            {sub.category}
+                                          </span>
+                                        </div>
+                                        {sub.description && (
+                                          <p className="text-[10px] text-slate-450 break-words leading-tight">{sub.description}</p>
+                                        )}
+                                        <div className="flex justify-between items-center text-[9px] text-slate-400 font-bold border-t border-slate-100 pt-1 mt-1">
+                                          <span>Date: {sub.claimDate}</span>
+                                          <span className="font-semibold text-slate-600">₹{(Number(sub.amount) || 0).toLocaleString('en-IN')}</span>
+                                        </div>
+                                      </div>
+                                    ))}
                                     {item.remarks && (
-                                      <p className="text-[10px] text-slate-650 bg-slate-100 p-1.5 rounded italic mt-1 border-l-2 border-slate-350 bg-opacity-80">
+                                      <p className="text-[10px] text-slate-650 bg-amber-50/50 p-2 rounded italic mt-1 border-l-2 border-amber-350 leading-relaxed">
                                         Admin: {item.remarks}
                                       </p>
                                     )}
                                   </div>
                                 </td>
 
-                                <td className="py-3.5 px-4 font-extrabold text-slate-950 whitespace-nowrap text-sm">
-                                  ₹{item.amount.toLocaleString('en-IN')}
+                                <td className="py-3.5 px-4 font-black text-slate-900 whitespace-nowrap text-sm text-right bg-slate-50/30">
+                                  <div className="pr-2">
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">Grand Total</p>
+                                    <p className="text-xs font-black text-blue-700 mt-1">₹{(item.totalAmount || 0).toLocaleString('en-IN')}</p>
+                                  </div>
                                 </td>
 
-                                <td className="py-3.5 px-4 whitespace-nowrap text-slate-600">
+                                <td className="py-3.5 px-4 whitespace-nowrap text-slate-650 font-medium">
                                   <div>
-                                    <p className="leading-none text-[10px] text-slate-400 font-medium">Submitted:</p>
+                                    <p className="leading-none text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Submitted</p>
                                     <p className="font-semibold">{item.submitDate}</p>
-                                    <p className="leading-none text-[10px] text-slate-400 font-medium mt-1">Claimed Date:</p>
-                                    <p>{item.claimDate}</p>
                                   </div>
                                 </td>
 
                                 <td className="py-3.5 px-4">
-                                  {item.attachmentUrl ? (
-                                    <a 
-                                      href={item.attachmentUrl} 
-                                      target="_blank" 
-                                      referrerPolicy="no-referrer"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 font-semibold text-blue-600 hover:text-blue-800 underline hover:no-underline"
-                                    >
-                                      View Invoice
-                                    </a>
-                                  ) : (
-                                    <span className="text-[10px] text-slate-400 italic">No receipt</span>
-                                  )}
+                                  <div className="flex flex-col gap-1 max-w-[120px]">
+                                    {(item.items || []).map((sub: any, sIdx: number) => {
+                                      if (!sub.attachmentUrl) return null;
+                                      return (
+                                        <a 
+                                          key={sIdx}
+                                          href={sub.attachmentUrl} 
+                                          target="_blank" 
+                                          referrerPolicy="no-referrer"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 font-bold text-blue-600 hover:text-blue-800 hover:underline text-[9px] bg-blue-50/60 border border-blue-150 py-0.5 px-1.5 rounded truncate"
+                                          title={`View receipt for ${sub.title}`}
+                                        >
+                                          <Upload className="h-2.5 w-2.5 flex-shrink-0 text-blue-500" />
+                                          Receipt #{sIdx + 1}
+                                        </a>
+                                      );
+                                    })}
+                                    {!(item.items || []).some((sub: any) => sub.attachmentUrl) && (
+                                      <span className="text-[10px] text-slate-400 italic">No receipts</span>
+                                    )}
+                                  </div>
                                 </td>
 
-                                <td className="py-3.5 px-4">
+                                 <td className="py-3.5 px-4">
                                   <div className="space-y-1.5">
                                     <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                                       item.status === 'Approved' 
                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-250' 
-                                        : item.status === 'Processed'
+                                        : (item.status === 'Processed' || item.status === 'Payment Process On Going')
                                         ? 'bg-blue-50 text-blue-700 border-blue-250'
                                         : item.status === 'Released'
                                         ? 'bg-purple-50 text-purple-750 border-purple-250'
@@ -1115,27 +1208,88 @@ export default function App() {
                                       {item.status || 'Pending'}
                                     </span>
                                     
-                                    <div>
+                                    <div className="flex items-center gap-1.5">
                                       <button 
                                         onClick={() => {
                                           setSelectedClaim(item);
                                           setRemarksState(item.remarks || '');
                                         }}
-                                        className={`mt-1 block py-1 px-2 rounded font-semibold text-[10px] shadow-sm transition-all cursor-pointer ${
+                                        className={`py-1 px-2 rounded font-semibold text-[10px] shadow-sm transition-all cursor-pointer ${
                                           item.status === 'Pending'
                                             ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-900 border border-indigo-200'
                                             : item.status === 'Approved'
                                             ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200'
-                                            : item.status === 'Processed'
+                                            : (item.status === 'Processed' || item.status === 'Payment Process On Going')
                                             ? 'bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-900 border border-purple-200'
                                             : 'bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200'
                                         }`}
                                       >
-                                        {item.status === 'Pending' && 'Resolve claim'}
-                                        {item.status === 'Approved' && 'Process payment'}
-                                        {item.status === 'Processed' && 'Release payment'}
-                                        {(item.status === 'Released' || item.status === 'Rejected') && 'View details'}
+                                        {item.status === 'Pending' && 'Resolve'}
+                                        {item.status === 'Approved' && 'Process'}
+                                        {(item.status === 'Processed' || item.status === 'Payment Process On Going') && 'Release'}
+                                        {(item.status === 'Released' || item.status === 'Rejected') && 'View'}
                                       </button>
+
+                                      {deleteConfirmId === item.id ? (
+                                        <div className="flex items-center gap-1 bg-rose-50 px-1 py-0.5 rounded border border-rose-200">
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setDeleteConfirmId(null);
+                                            }}
+                                            className="px-1 text-[9px] hover:bg-rose-100 text-slate-600 rounded transition-all cursor-pointer font-bold"
+                                            title="Cancel deletion"
+                                          >
+                                            No
+                                          </button>
+                                          <button
+                                            onClick={async (e) => {
+                                              e.stopPropagation();
+                                              setDeleteConfirmId(null);
+                                              setActionStatus({ type: 'updating', message: `Permanently deleting claim ${item.id}...` });
+                                              try {
+                                                const response = await fetch('/api/admin/claims/delete', {
+                                                  method: 'POST',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify({
+                                                    claimId: item.id,
+                                                    sheetName: (item as any).sheetName || item.branch
+                                                  })
+                                                });
+                                                const resData = await response.json();
+                                                if (resData.success) {
+                                                  let msg = 'Successfully deleted the claim.';
+                                                  if (resData.sheetsWarning) {
+                                                    msg += ` Note: Google Sheets warning - ${resData.sheetsWarning}. Please ensure your service account has Editor access to the spreadsheet.`;
+                                                  }
+                                                  setActionStatus({ type: 'success', message: msg });
+                                                  setTimeout(() => setActionStatus({ type: 'idle', message: '' }), 3500);
+                                                  fetchClaims();
+                                                } else {
+                                                  setActionStatus({ type: 'error', message: resData.error || 'Failed to delete.' });
+                                                }
+                                              } catch (err: any) {
+                                                setActionStatus({ type: 'error', message: err.message });
+                                              }
+                                            }}
+                                            className="px-1 text-[9px] bg-rose-600 hover:bg-rose-700 text-white rounded transition-all cursor-pointer font-bold"
+                                            title="Confirm permanent delete"
+                                          >
+                                            Yes
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setDeleteConfirmId(item.id);
+                                          }}
+                                          title="Permanently Delete Claim"
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-650 hover:text-rose-800 border border-rose-250 rounded cursor-pointer transition-all flex items-center justify-center animate-pulse"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
                                 </td>
@@ -1209,30 +1363,48 @@ export default function App() {
                 <div className="bg-slate-50 rounded p-4 text-xs space-y-2 border border-slate-200">
                   <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Employee:</strong> {selectedClaim.claimantName} ({selectedClaim.claimantEmail})</p>
                   <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Branch Office:</strong> {selectedClaim.branch}</p>
-                  <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Expense Title:</strong> <span className="font-bold text-slate-950">{selectedClaim.title}</span></p>
-                  <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block font-bold">Total Amount to Reimburse:</strong> <span className="text-slate-950 font-extrabold text-sm">₹{selectedClaim.amount.toLocaleString('en-IN')}</span></p>
-                  {selectedClaim.description && (
-                    <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Claim Description:</strong> <span className="italic text-slate-600 block bg-white p-2 rounded mt-1 border border-slate-150 leading-relaxed">{selectedClaim.description}</span></p>
-                  )}
-                  {selectedClaim.attachmentUrl && (
-                    <div className="pt-1">
-                      <a 
-                        href={selectedClaim.attachmentUrl} 
-                        target="_blank" 
-                        referrerPolicy="no-referrer"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-800 underline font-semibold flex items-center gap-1"
-                      >
-                        Open Receipt Invoice Attachment Link
-                      </a>
-                    </div>
-                  )}
+                  <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block font-bold">Total Amount to Reimburse:</strong> <span className="text-slate-950 font-extrabold text-sm">₹{(selectedClaim.totalAmount || selectedClaim.amount || 0).toLocaleString('en-IN')}</span></p>
+                  
+                  {/* List of items */}
+                  <div className="space-y-3 pt-2 border-t border-slate-200">
+                    <p className="font-bold text-[9px] text-slate-450 uppercase tracking-wide">Expense Items ({selectedClaim.items?.length || 1})</p>
+                    {(selectedClaim.items || [{ title: selectedClaim.title, description: selectedClaim.description, amount: selectedClaim.amount, category: selectedClaim.category, claimDate: selectedClaim.claimDate, attachmentUrl: selectedClaim.attachmentUrl }]).map((sub: any, sIdx: number) => (
+                      <div key={sIdx} className="p-2 rounded bg-white border border-slate-150 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <span className="font-bold text-slate-800 leading-tight block">{sub.title || "No Title"}</span>
+                          <span className="inline-block text-[8px] font-bold text-indigo-700 bg-indigo-50 px-1 border border-indigo-100 rounded">
+                            {sub.category}
+                          </span>
+                        </div>
+                        {sub.description && (
+                          <p className="text-[10px] text-slate-500 break-words leading-tight">{sub.description}</p>
+                        )}
+                        <div className="flex justify-between items-center text-[10px] text-slate-400 font-medium">
+                          <span>Date: {sub.claimDate}</span>
+                          <span className="font-bold text-slate-755">₹{(Number(sub.amount) || 0).toLocaleString('en-IN')}</span>
+                        </div>
+                        {sub.attachmentUrl && (
+                          <div className="pt-1">
+                            <a 
+                              href={sub.attachmentUrl} 
+                              target="_blank" 
+                              referrerPolicy="no-referrer"
+                              rel="noopener noreferrer"
+                              className="text-[10px] text-blue-600 hover:text-blue-800 underline font-semibold flex items-center gap-0.5"
+                            >
+                              View Receipt Invoice
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Status workflow stage tracker */}
                 <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 text-[10px]">
                   <div className={`p-2 rounded border ${
-                    (selectedClaim as any).approved === 'Yes' || selectedClaim.status === 'Approved' || selectedClaim.status === 'Processed' || selectedClaim.status === 'Released'
+                    (selectedClaim as any).approved === 'Yes' || selectedClaim.status === 'Approved' || selectedClaim.status === 'Processed' || selectedClaim.status === 'Payment Process On Going' || selectedClaim.status === 'Released'
                       ? 'bg-emerald-50 border-emerald-200 text-emerald-850 font-medium' 
                       : 'bg-slate-50 border-slate-250 text-slate-500'
                   }`}>
@@ -1244,7 +1416,7 @@ export default function App() {
                     </p>
                   </div>
                   <div className={`p-2 rounded border ${
-                    (selectedClaim as any).paymentProcess === 'Yes' || selectedClaim.status === 'Processed' || selectedClaim.status === 'Released'
+                    (selectedClaim as any).paymentProcess === 'Yes' || selectedClaim.status === 'Processed' || selectedClaim.status === 'Payment Process On Going' || selectedClaim.status === 'Released'
                       ? 'bg-blue-50 border-blue-200 text-blue-800 font-medium' 
                       : 'bg-slate-50 border-slate-250 text-slate-500'
                   }`}>
@@ -1269,16 +1441,18 @@ export default function App() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Administrative Remarks / Action Reason (Sent to claimant)</label>
-                  <textarea 
-                    rows={2}
-                    value={remarksState}
-                    onChange={(e) => setRemarksState(e.target.value)}
-                    placeholder="Enter approval details, accounts instructions, or rejection reasons..."
-                    className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-xs text-slate-950 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
+                {selectedClaim.status === 'Pending' && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Administrative Remarks / Action Reason (Sent to claimant)</label>
+                    <textarea 
+                      rows={2}
+                      value={remarksState}
+                      onChange={(e) => setRemarksState(e.target.value)}
+                      placeholder="Enter approval details, accounts instructions, or rejection reasons..."
+                      className="w-full bg-white border border-slate-250 py-2 px-3 rounded-lg text-xs text-slate-950 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100 font-semibold text-xs">
                   {selectedClaim.status === 'Pending' && (
@@ -1327,7 +1501,7 @@ export default function App() {
                     </>
                   )}
 
-                  {selectedClaim.status === 'Processed' && (
+                  {(selectedClaim.status === 'Processed' || selectedClaim.status === 'Payment Process On Going') && (
                     <>
                       <button 
                         id="reject_claim_btn"
@@ -1355,6 +1529,41 @@ export default function App() {
                       This transaction has been finalized as <span className="font-bold text-slate-800 underline">{selectedClaim.status}</span>. No further action is required.
                     </div>
                   )}
+                </div>
+
+                <div className="pt-4 border-t border-slate-200">
+                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 flex flex-col sm:flex-row justify-between items-center gap-2">
+                    <div>
+                      <p className="text-xs font-bold text-rose-800">Dangerous Administrative Action</p>
+                      <p className="text-[10px] text-rose-600 leading-tight">Permanently delete this claim across Google Sheets, Supabase, Firestore, and local caches.</p>
+                    </div>
+                    {deleteSidebarConfirm ? (
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
+                        <button
+                          onClick={() => setDeleteSidebarConfirm(false)}
+                          className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded text-[11px] transition-all cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleDeleteClaim}
+                          className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded text-[11px] hover:shadow transition-all cursor-pointer"
+                        >
+                          Confirm Delete
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        id="delete_claim_btn"
+                        onClick={handleDeleteClaim}
+                        disabled={actionStatus.type === 'updating'}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded text-[11px] shadow hover:shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete Claim
+                      </button>
+                    )}
+                  </div>
                 </div>
 
               </div>

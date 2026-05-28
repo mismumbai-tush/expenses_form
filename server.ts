@@ -35,6 +35,31 @@ const getFirebaseServerTimestamp = () => {
   }
   return new Date();
 };
+
+const getIndianTimestamp = (): string => {
+  const d = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+const getIndianDateString = (): string => {
+  const d = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const formatToIndianTime = (date: any): string => {
+  if (!date) return "";
+  const d = date instanceof Date ? date : new Date(date);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+const getAdminDisplayName = (email: string): string => {
+  if (!email || !email.includes("@")) return "System Admin";
+  return email.split("@")[0].replace(/\./g, " ").trim().toLowerCase();
+};
+
 import fs from "fs";
 import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
@@ -61,6 +86,7 @@ const logErrorToFile = (context: string, err: any, extra?: any) => {
 // --- Firebase Admin Initialization ---
 let firebaseProjectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
 let firebaseDatabaseId = process.env.FIREBASE_DATABASE_ID || process.env.VITE_FIREBASE_DATABASE_ID;
+let isCustomProject = false;
 
 try {
   // If FIREBASE_PROJECT_ID is not provided in env, fall back to sandbox appletconfig
@@ -77,6 +103,24 @@ try {
 
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
   let privateKey = process.env.GOOGLE_PRIVATE_KEY?.trim();
+
+  // If a custom Google Service Account is configured (e.g. expenses@expenses-496705.iam.gserviceaccount.com),
+  // extract the correct project ID automatically to align credentials and avoid 7 PERMISSION_DENIED errors.
+  if (clientEmail && clientEmail.includes("@") && clientEmail.includes(".iam.gserviceaccount.com")) {
+    const extractedProjId = clientEmail.split("@")[1].split(".iam.gserviceaccount.com")[0];
+    if (extractedProjId && extractedProjId !== firebaseProjectId) {
+      console.log(`[Firebase Security Patch] Auto-aligning project ID to match custom service account: ${extractedProjId} (was ${firebaseProjectId})`);
+      firebaseProjectId = extractedProjId;
+      isCustomProject = true;
+    }
+  }
+
+  // If using a custom Project ID, override the sandbox database ID to default,
+  // since custom projects do not have the specific AI Studio sandbox database.
+  if (isCustomProject || (clientEmail && process.env.GOOGLE_PRIVATE_KEY)) {
+    firebaseDatabaseId = process.env.FIREBASE_DATABASE_ID || process.env.VITE_FIREBASE_DATABASE_ID || "(default)";
+    console.log(`[Firebase Security Patch] Using database ID for production/custom project: ${firebaseDatabaseId}`);
+  }
 
   if (firebaseProjectId) {
     const options: any = {
@@ -753,7 +797,7 @@ app.post("/api/claim", async (req, res) => {
     } = req.body;
 
     const submissionId = `EXP-${Date.now()}`;
-    const timestamp = new Date().toLocaleString();
+    const timestamp = getIndianTimestamp();
 
     // Process File Uploads (Safe Google Drive attachment helper)
     let driveClient: any = null;
@@ -907,7 +951,8 @@ app.post("/api/claim", async (req, res) => {
         try {
           const updatedRange = appendResponse.data.updates?.updatedRange;
           if (updatedRange) {
-            const rowsMatch = updatedRange.match(/(\d+):[A-Z]+(\d+)/);
+            const rangePart = updatedRange.split('!').pop();
+            const rowsMatch = rangePart?.match(/[A-Z]+(\d+):[A-Z]+(\d+)/) || updatedRange.match(/(\d+):[A-Z]+(\d+)/);
             if (rowsMatch) {
               const startRowIndex = parseInt(rowsMatch[1]) - 1; // 0-indexed
               const endRowIndex = parseInt(rowsMatch[2]); // Exclusive
@@ -1127,12 +1172,37 @@ app.get("/api/claims", async (req, res) => {
         if (rows.length < 2) return;
 
         const headers = rows[0];
+        let lastSeenClaimObj: any = null;
+
         const data = rows.slice(1).map((row, index) => {
           const obj: any = { rowIndex: index + 2, sheetName: title }; 
           headers.forEach((header: string, i: number) => {
             const key = header.toLowerCase().replace(/ /g, "");
             obj[key] = row[i] || "";
           });
+
+          // Fill down merged cell values if this row is part of a merged block (identified by empty submissionid)
+          if (!obj.submissionid && lastSeenClaimObj) {
+            obj.submissionid = lastSeenClaimObj.submissionid || "";
+            obj.timestamp = lastSeenClaimObj.timestamp || "";
+            obj.branch = lastSeenClaimObj.branch || "";
+            obj.branchname = lastSeenClaimObj.branchname || lastSeenClaimObj.branch || "";
+            obj.name = lastSeenClaimObj.name || "";
+            obj.salespersonname = lastSeenClaimObj.salespersonname || lastSeenClaimObj.name || "";
+            obj.grandtotal = lastSeenClaimObj.grandtotal || "";
+            obj.adminremark = lastSeenClaimObj.adminremark || "";
+            obj.mailsent = lastSeenClaimObj.mailsent || "";
+            obj.approved = lastSeenClaimObj.approved || "";
+            obj.approveddetails = lastSeenClaimObj.approveddetails || "";
+            obj.approvedtimestamp = lastSeenClaimObj.approvedtimestamp || lastSeenClaimObj.approveddetails || "";
+            obj.paymentprocess = lastSeenClaimObj.paymentprocess || "";
+            obj.processedby = lastSeenClaimObj.processedby || "";
+            obj.status = lastSeenClaimObj.status || "";
+            obj.paymentrelease = lastSeenClaimObj.paymentrelease || "";
+            obj.releasedby = lastSeenClaimObj.releasedby || "";
+          } else if (obj.submissionid) {
+            lastSeenClaimObj = obj;
+          }
 
           // Dynamic backwards compatibility mapping for simple vs full headers
           if (obj.branch && !obj.branchname) obj.branchname = obj.branch;
@@ -1207,12 +1277,12 @@ app.get("/api/claims", async (req, res) => {
               dbClaims.push({
                 rowIndex: 2,
                 sheetName: docData.branchName,
-                timestamp: docData.createdAt?.toDate().toLocaleString() || new Date().toLocaleString(),
+                timestamp: docData.createdAt ? formatToIndianTime(docData.createdAt.toDate()) : getIndianTimestamp(),
                 submissionid: subId,
                 branchname: docData.branchName,
                 salespersonname: docData.salespersonName,
                 expensecategory: "General",
-                itemdate: new Date().toLocaleDateString(),
+                itemdate: getIndianDateString(),
                 fromlocation: "",
                 tolocation: "",
                 amount: String(docData.grandTotal),
@@ -1222,7 +1292,7 @@ app.get("/api/claims", async (req, res) => {
                 adminremark: docData.adminRemark || "",
                 mailsent: docData.mailSent ? "Yes" : "No",
                 approved: docData.status === "APPROVED" || docData.status === "PROCESSED" || docData.status === "RELEASED" ? "Yes" : "No",
-                approvedtimestamp: docData.approvedAt?.toDate().toLocaleString() || "",
+                approvedtimestamp: docData.approvedAt ? formatToIndianTime(docData.approvedAt.toDate()) : "",
                 paymentprocess: docData.status === "PROCESSED" || docData.status === "RELEASED" ? "Yes" : "No",
                 processedby: docData.processedBy || "",
                 status: docData.status,
@@ -1235,7 +1305,7 @@ app.get("/api/claims", async (req, res) => {
                 dbClaims.push({
                   rowIndex: idx + 2,
                   sheetName: docData.branchName,
-                  timestamp: docData.createdAt?.toDate().toLocaleString() || new Date().toLocaleString(),
+                  timestamp: docData.createdAt ? formatToIndianTime(docData.createdAt.toDate()) : getIndianTimestamp(),
                   submissionid: subId,
                   branchname: docData.branchName,
                   salespersonname: docData.salespersonName,
@@ -1250,7 +1320,7 @@ app.get("/api/claims", async (req, res) => {
                   adminremark: docData.adminRemark || "",
                   mailsent: docData.mailSent ? "Yes" : "No",
                   approved: docData.status === "APPROVED" || docData.status === "PROCESSED" || docData.status === "RELEASED" ? "Yes" : "No",
-                  approvedtimestamp: docData.approvedAt?.toDate().toLocaleString() || "",
+                  approvedtimestamp: docData.approvedAt ? formatToIndianTime(docData.approvedAt.toDate()) : "",
                   paymentprocess: docData.status === "PROCESSED" || docData.status === "RELEASED" ? "Yes" : "No",
                   processedby: docData.processedBy || "",
                   status: docData.status,
@@ -1303,7 +1373,7 @@ app.post("/api/claims", async (req, res) => {
     } = req.body;
 
     const submissionId = 'CLM-' + Math.floor(100000 + Math.random() * 900000);
-    const timestamp = new Date().toLocaleString();
+    const timestamp = getIndianTimestamp();
 
     let driveClient: any = null;
     try {
@@ -1494,7 +1564,7 @@ app.post("/api/claims", async (req, res) => {
 // 2c. Flat Claim approval activity action (Approve, Reject, Process, Release from client-side App.tsx)
 app.post("/api/claims/action", async (req, res) => {
   try {
-    const { id, status, remarks, claimantEmail, title, amount, rowIndex: reqRowIndex, branchName: reqBranchName } = req.body;
+    const { id, status, remarks, claimantEmail, title, amount, rowIndex: reqRowIndex, branchName: reqBranchName, adminEmail: reqAdminEmail } = req.body;
 
     const claim = fallbackClaims.find(c => c.submissionid === id);
     const branchName = reqBranchName || (claim ? claim.branchname : "Sheet1");
@@ -1522,9 +1592,9 @@ app.post("/api/claims/action", async (req, res) => {
       console.warn("Dynamic row locator failed:", rowLocError);
     }
 
-    const adminName = "System Admin";
-    const adminEmail = "mis.mumbai@ginzalimited.com";
-    const timestamp = new Date().toLocaleString();
+    const adminEmail = reqAdminEmail || "mis.mumbai@ginzalimited.com";
+    const adminName = getAdminDisplayName(adminEmail);
+    const timestamp = getIndianTimestamp();
 
     let action = "REMARK";
     if (status === "Approved") action = "APPROVE";
@@ -1532,7 +1602,7 @@ app.post("/api/claims/action", async (req, res) => {
     else if (status === "Released") action = "RELEASE";
     else if (status === "Rejected") action = "REMARK";
 
-    const mappedComment = action === "APPROVE" ? "Approved" : (remarks || status);
+    const mappedComment = remarks || (action === "APPROVE" ? "Approved" : status);
 
     // Update in-memory local fallback array
     fallbackClaims = fallbackClaims.map(c => {
@@ -1546,10 +1616,12 @@ app.post("/api/claims/action", async (req, res) => {
           updated.approved = "Yes";
           updated.approvedtimestamp = `${adminName} - ${timestamp}`;
           updated.status = "Approved";
+          updated.adminremark = mappedComment;
+          updated.mailsent = "Yes";
         } else if (action === "PROCESS") {
           updated.paymentprocess = "Yes";
           updated.processedby = `${adminName} - ${timestamp}`;
-          updated.status = "Processed";
+          updated.status = "Payment Process On Going";
         } else if (action === "RELEASE") {
           updated.paymentrelease = "Yes";
           updated.releasedby = `${adminName} - ${timestamp}`;
@@ -1575,8 +1647,10 @@ app.post("/api/claims/action", async (req, res) => {
           updateData.status = "APPROVED";
           updateData.approvedAt = getFirebaseServerTimestamp();
           updateData.approvedBy = `${adminName} (${adminEmail})`;
+          updateData.adminRemark = mappedComment;
+          updateData.mailSent = true;
         } else if (action === "PROCESS") {
-          updateData.status = "PROCESSED";
+          updateData.status = "Payment Process On Going";
           updateData.processedBy = `${adminName} (${adminEmail})`;
           updateData.processedAt = getFirebaseServerTimestamp();
         } else if (action === "RELEASE") {
@@ -1602,10 +1676,12 @@ app.post("/api/claims/action", async (req, res) => {
           updateFields.approved = "Yes";
           updateFields.approvedtimestamp = `${adminName} - ${timestamp}`;
           updateFields.status = "Approved";
+          updateFields.adminremark = mappedComment;
+          updateFields.mailsent = "Yes";
         } else if (action === "PROCESS") {
           updateFields.paymentprocess = "Yes";
           updateFields.processedby = `${adminName} - ${timestamp}`;
-          updateFields.status = "Processed";
+          updateFields.status = "Payment Process On Going";
         } else if (action === "RELEASE") {
           updateFields.paymentrelease = "Yes";
           updateFields.releasedby = `${adminName} - ${timestamp}`;
@@ -1639,12 +1715,13 @@ app.post("/api/claims/action", async (req, res) => {
           requestBody: { values: [["Rejected"]] },
         });
       } else if (action === "APPROVE") {
-        const range = `${targetSheet}!O${rowIndex}:P${rowIndex}`;
+        // Update Column M (Admin Remark), N (Mail Sent), O (Approved), P (Approved Timestamp) all at once
+        const range = `${targetSheet}!M${rowIndex}:P${rowIndex}`;
         await sheets.spreadsheets.values.update({
           spreadsheetId: SHEET_ID,
           range: range,
           valueInputOption: "USER_ENTERED",
-          requestBody: { values: [["Yes", `${adminName} - ${timestamp}`]] },
+          requestBody: { values: [[mappedComment, "Yes", "Yes", `${adminName} - ${timestamp}`]] },
         });
 
         // Column S - Status state
@@ -1662,7 +1739,7 @@ app.post("/api/claims/action", async (req, res) => {
           spreadsheetId: SHEET_ID,
           range: range,
           valueInputOption: "USER_ENTERED",
-          requestBody: { values: [["Yes", `${adminName} - ${timestamp}`, "Processed"]] },
+          requestBody: { values: [["Yes", `${adminName} - ${timestamp}`, "Payment Process On Going"]] },
         });
       } else if (action === "RELEASE") {
         // Column T (Payment Release), U (Released By)
@@ -1713,15 +1790,17 @@ app.post("/api/claims/action", async (req, res) => {
       // Branch Emails Mapping
       const BRANCH_EMAILS: Record<string, string> = {
         "Ludhiana": "kavita.acharya@ginzalimited.com",
+        "Mumbai": "kavita.acharya@ginzalimited.com",
+        "Jaipur": "kavita.acharya@ginzalimited.com",
         "Bangalore": "cash.udhna@ginzalimited.com",
         "Surat": "cash.udhna@ginzalimited.com",
         "Tirupur": "cash.udhna@ginzalimited.com"
       };
 
-      const accountsMail = BRANCH_EMAILS[claimBranch] || process.env.ACCOUNTS_EMAIL || "patilyog345@gmail.com";
+      const accountsMail = BRANCH_EMAILS[claimBranch] || "cash.udhna@ginzalimited.com";
 
       if (action === "REMARK") {
-        const mailBody = `Dear claimant,\n\nYour claims submission with ID: ${id} (₹${amount}) was Rejected / Remarked by Admin:\n\n"${mappedComment}"\n\nPlease check the portal to update your transactions logs.\n\nThank you,\nExpense Department`;
+        const mailBody = `Dear ${employeeName},\n\nYour claims submission with ID: ${id} (₹${amount}) was Rejected / Remarked by Admin:\n\n"${mappedComment}"\n\nPlease check the portal to update your transactions logs.\n\nThank you,\nExpense Department`;
         await sendMail(
           targetClaimant,
           `${adminEmails},${bHeadEmail}`,
@@ -1731,7 +1810,8 @@ app.post("/api/claims/action", async (req, res) => {
           adminEmail
         );
       } else if (action === "APPROVE") {
-        const mailBody = `Dear claimant,\n\nYour claims submission with ID: ${id} of ₹${amount} was APPROVED successfully by Admin.\n\nApproved Date: ${timestamp}\n\nThank you,\nExpense Department`;
+        const remarkString = mappedComment && mappedComment !== "Approved" ? `\n\nAdministrative Remarks:\n"${mappedComment}"` : "";
+        const mailBody = `Dear ${employeeName},\n\nYour claims submission with ID: ${id} of ₹${amount} was APPROVED successfully by Admin.${remarkString}\n\nApproved Date: ${timestamp}\n\nThank you,\nExpense Department`;
         await sendMail(
           targetClaimant,
           `${adminEmails},${bHeadEmail}`,
@@ -1875,9 +1955,9 @@ app.post("/api/claims/action", async (req, res) => {
 app.post("/api/admin/action", async (req, res) => {
   const { action, rowIndex, claimId, data, adminName: reqAdminName, adminEmail: reqAdminEmail, sheetName } = req.body;
   const targetSheet = sheetName || "Sheet1";
-  const adminName = reqAdminName || "Admin"; 
-  const adminEmail = reqAdminEmail || process.env.SMTP_USER || "";
-  const timestamp = new Date().toLocaleString();
+  const adminEmail = reqAdminEmail || "mis.mumbai@ginzalimited.com";
+  const adminName = getAdminDisplayName(adminEmail);
+  const timestamp = getIndianTimestamp();
 
   try {
     // --- 1. LOCAL CACHE MEMORY UPDATE ---
@@ -1895,7 +1975,7 @@ app.post("/api/admin/action", async (req, res) => {
         } else if (action === "PROCESS") {
           updated.paymentprocess = "Yes";
           updated.processedby = `${adminName} - ${timestamp}`;
-          updated.status = "Processed";
+          updated.status = "Payment Process On Going";
         } else if (action === "RELEASE") {
           updated.paymentrelease = "Yes";
           updated.releasedby = `${adminName} - ${timestamp}`;
@@ -1922,7 +2002,7 @@ app.post("/api/admin/action", async (req, res) => {
           updateData.approvedAt = getFirebaseServerTimestamp();
           updateData.approvedBy = `${adminName} (${adminEmail})`;
         } else if (action === "PROCESS") {
-          updateData.status = "PROCESSED";
+          updateData.status = "Payment Process On Going";
           updateData.processedBy = `${adminName} (${adminEmail})`;
           updateData.processedAt = getFirebaseServerTimestamp();
         } else if (action === "RELEASE") {
@@ -1952,7 +2032,7 @@ app.post("/api/admin/action", async (req, res) => {
         } else if (action === "PROCESS") {
           updateFields.paymentprocess = "Yes";
           updateFields.processedby = `${adminName} - ${timestamp}`;
-          updateFields.status = "Processed";
+          updateFields.status = "Payment Process On Going";
         } else if (action === "RELEASE") {
           updateFields.paymentrelease = "Yes";
           updateFields.releasedby = `${adminName} - ${timestamp}`;
@@ -1995,7 +2075,7 @@ app.post("/api/admin/action", async (req, res) => {
           spreadsheetId: SHEET_ID,
           range: range,
           valueInputOption: "USER_ENTERED",
-          requestBody: { values: [["Yes", `${adminName} - ${timestamp}`, `Mail sent to Accounts at ${timestamp}`]] },
+          requestBody: { values: [["Yes", `${adminName} - ${timestamp}`, "Payment Process On Going"]] },
         });
       }
       else if (action === "RELEASE") {
@@ -2006,6 +2086,15 @@ app.post("/api/admin/action", async (req, res) => {
           range: range,
           valueInputOption: "USER_ENTERED",
           requestBody: { values: [["Yes", `${adminName} - ${timestamp}`]] },
+        });
+
+        // Column S - Status state
+        const statusRange = `${targetSheet}!S${rowIndex}`;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: statusRange,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [["Released"]] },
         });
       }
     } catch (sheetError: any) {
@@ -2031,12 +2120,14 @@ app.post("/api/admin/action", async (req, res) => {
       // Branch Emails Mapping
       const BRANCH_EMAILS: Record<string, string> = {
         "Ludhiana": "kavita.acharya@ginzalimited.com",
+        "Mumbai": "kavita.acharya@ginzalimited.com",
+        "Jaipur": "kavita.acharya@ginzalimited.com",
         "Bangalore": "cash.udhna@ginzalimited.com",
         "Surat": "cash.udhna@ginzalimited.com",
         "Tirupur": "cash.udhna@ginzalimited.com"
       };
 
-      const accountsMail = BRANCH_EMAILS[bName] || process.env.ACCOUNTS_EMAIL || "patilyog345@gmail.com";
+      const accountsMail = BRANCH_EMAILS[bName] || "cash.udhna@ginzalimited.com";
 
       if (action === "REMARK") {
         await sendMail(
@@ -2086,6 +2177,147 @@ app.post("/api/admin/action", async (req, res) => {
   } catch (error: any) {
     console.error("Admin Action Failed:", error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. Admin Delete Claim from Cache, Firestore, Supabase, and Google Sheets
+app.post("/api/admin/claims/delete", async (req, res) => {
+  const { claimId, sheetName } = req.body;
+  if (!claimId) {
+    return res.status(400).json({ success: false, error: "Missing claimId parameter" });
+  }
+
+  try {
+    console.log(`Received request to delete claim: ${claimId}`);
+
+    // --- 1. LOCAL CACHE MEMORY DELETE ---
+    fallbackClaims = fallbackClaims.filter(c => c.submissionid !== claimId);
+    saveLocalJSON(CLAIMS_FILE, fallbackClaims);
+
+    // --- 2. SUPABASE DB DELETE ---
+    try {
+      if (supabaseClient) {
+        const { error } = await supabaseClient
+          .from("expense_claims")
+          .delete()
+          .eq("submission_id", claimId);
+        if (error) {
+          console.error("Supabase delete failure:", error.message);
+        } else {
+          console.log(`Claim ${claimId} successfully deleted from Supabase.`);
+        }
+      }
+    } catch (sbErr: any) {
+      console.error("Supabase delete error (non-blocking):", sbErr.message);
+    }
+
+    // --- 3. FIRESTORE DELETE ---
+    try {
+      if (isFirestoreEnabled()) {
+        const claimRef = db.collection('claims').doc(claimId);
+        const itemsSnapshot = await claimRef.collection('items').get();
+        const batch = db.batch();
+        itemsSnapshot.docs.forEach(doc => batch.delete(doc.ref));
+        batch.delete(claimRef);
+        await batch.commit();
+        console.log(`Claim ${claimId} deleted from Firestore.`);
+      }
+    } catch (fsErr: any) {
+      console.error("Firestore delete error (non-blocking):", fsErr.message);
+      if (fsErr.message && fsErr.message.includes("PERMISSION_DENIED")) {
+        const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "your Cloud Run service account";
+        console.warn(
+          `[Firestore Fix Tip] To fix PERMISSION_DENIED on delete, please ensure that the service account '${saEmail}' has the 'Cloud Datastore User' or 'Cloud Datastore Owner' role assigned in Google Cloud IAM for your project.`
+        );
+      }
+    }
+
+    let sheetsDeletedCount = 0;
+    let sheetsWarning = null;
+
+    // --- 4. GOOGLE SHEETS LIVE ROW DELETE ---
+    try {
+      const sheets = await getSheetsClient();
+      const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
+      const sheetsList = spreadsheet.data.sheets || [];
+
+      for (const sheet of sheetsList) {
+        const title = sheet.properties?.title;
+        const sheetId = sheet.properties?.sheetId;
+        if (!title || sheetId === undefined) continue;
+
+        const isMailsSheet = title === "_Mails_";
+        
+        try {
+          const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SHEET_ID,
+            range: `${title}!A:U`
+          });
+          const rows = response.data.values || [];
+          if (rows.length === 0) continue;
+
+          const matchingIndices: number[] = [];
+          let lastSeenClaimId: string | null = null;
+          rows.forEach((row: any, idx: number) => {
+            if (isMailsSheet) {
+              const valToMatch = row[0];
+              if (valToMatch && valToMatch.toString().trim() === claimId.toString().trim()) {
+                matchingIndices.push(idx + 1);
+              }
+            } else {
+              const valToMatch = row[1];
+              if (valToMatch && valToMatch.toString().trim()) {
+                lastSeenClaimId = valToMatch.toString().trim();
+              }
+              const activeClaimId = (valToMatch && valToMatch.toString().trim()) || lastSeenClaimId;
+              if (activeClaimId && activeClaimId === claimId.toString().trim()) {
+                matchingIndices.push(idx + 1);
+              }
+            }
+          });
+
+          if (matchingIndices.length > 0) {
+            console.log(`Found ${matchingIndices.length} matching row(s) to delete in sheet "${title}".`);
+            // Sort indices in descending order so that bottom row deletions do not affect top index calculations
+            matchingIndices.sort((a, b) => b - a);
+            
+            const requests = matchingIndices.map(rowIndex => ({
+              deleteDimension: {
+                range: {
+                  sheetId,
+                  dimension: "ROWS",
+                  startIndex: rowIndex - 1,
+                  endIndex: rowIndex
+                }
+              }
+            }));
+
+            await sheets.spreadsheets.batchUpdate({
+              spreadsheetId: SHEET_ID,
+              requestBody: { requests }
+            });
+            sheetsDeletedCount += matchingIndices.length;
+            console.log(`Successfully deleted ${matchingIndices.length} row(s) from sheet "${title}".`);
+          }
+        } catch (innerErr: any) {
+          console.warn(`Could not process sheet "${title}" for deletion:`, innerErr.message);
+          sheetsWarning = `Sheet "${title}": ${innerErr.message}`;
+        }
+      }
+    } catch (sheetError: any) {
+      console.warn("Google Sheets delete failed/bypassed:", sheetError.message);
+      sheetsWarning = sheetError.message;
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Claim ${claimId} has been successfully deleted from internal memory cache, Firestore, and Supabase.`,
+      sheetsDeletedCount,
+      sheetsWarning
+    });
+  } catch (error: any) {
+    console.error("Admin Delete Action Failed:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

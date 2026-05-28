@@ -68,12 +68,12 @@ service cloud.firestore {
     }
 
     match /claims/{claimId} {
-      allow read: if isAdmin();
+      allow read, delete: if isAdmin();
       allow create: if isValidClaim(incoming());
       allow update: if isAdmin() && isValidClaim(incoming());
       
       match /items/{itemId} {
-        allow read: if isAdmin();
+        allow read, delete: if isAdmin();
         allow create: if isValidClaimItem(incoming());
         allow update: if isAdmin() && isValidClaimItem(incoming());
       }

@@ -24,7 +24,7 @@ export interface Claim {
   branch: string;
   description: string;
   attachmentUrl?: string; // Google Drive url
-  status: 'Pending' | 'Approved' | 'Rejected' | 'Processed' | 'Released';
+  status: 'Pending' | 'Approved' | 'Rejected' | 'Processed' | 'Released' | 'Payment Process On Going';
   remarks?: string;
   rowIndex?: number;
   sheetName?: string;
@@ -34,4 +34,13 @@ export interface Claim {
   processedBy?: string;
   paymentRelease?: string;
   releasedBy?: string;
+  totalAmount?: number;
+  items?: Array<{
+    title: string;
+    description: string;
+    amount: number | string;
+    category: string;
+    claimDate: string;
+    attachmentUrl?: string;
+  }>;
 }
