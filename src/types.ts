@@ -35,6 +35,7 @@ export interface Claim {
   paymentRelease?: string;
   releasedBy?: string;
   totalAmount?: number;
+  holdItemIndexes?: number[];
   items?: Array<{
     title: string;
     description: string;

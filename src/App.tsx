@@ -116,6 +116,16 @@ export default function App() {
   // Admin selected action states
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
   const [remarksState, setRemarksState] = useState('');
+  const [heldItemIndexes, setHeldItemIndexes] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (selectedClaim) {
+      setHeldItemIndexes(selectedClaim.holdItemIndexes || []);
+    } else {
+      setHeldItemIndexes([]);
+    }
+  }, [selectedClaim]);
+
   const [actionStatus, setActionStatus] = useState<{ type: 'idle' | 'updating' | 'success' | 'error'; message: string }>({
     type: 'idle',
     message: ''
@@ -297,6 +307,17 @@ export default function App() {
   const handleAdminAction = async (status: 'Approved' | 'Rejected' | 'Processed' | 'Released') => {
     if (!selectedClaim) return;
     
+    // Compute total amount and on-hold offsets dynamically
+    const originalTotal = selectedClaim.totalAmount || selectedClaim.amount || 0;
+    const holdAmountTotal = (selectedClaim.items || []).reduce((acc, item, sIdx) => {
+      if (heldItemIndexes.includes(sIdx)) {
+        return acc + (Number(item.amount) || 0);
+      }
+      return acc;
+    }, 0);
+    const netTotal = Math.max(0, originalTotal - holdAmountTotal);
+
+    const actionStatusStr = status === 'Approved' ? 'Approved_Process' : status;
     setActionStatus({ type: 'updating', message: `Setting claim logs to ${status}...` });
 
     try {
@@ -305,11 +326,13 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: selectedClaim.id,
-          status,
+          status: actionStatusStr,
           remarks: remarksState,
           claimantEmail: selectedClaim.claimantEmail,
           title: selectedClaim.title,
-          amount: selectedClaim.amount,
+          amount: status === 'Approved' ? netTotal : originalTotal,
+          originalAmount: originalTotal,
+          holdItemIndexes: status === 'Approved' ? heldItemIndexes : [],
           rowIndex: (selectedClaim as any).rowIndex,
           branchName: (selectedClaim as any).sheetName,
           adminEmail: adminLoggedInEmail
@@ -322,6 +345,7 @@ export default function App() {
         setTimeout(() => {
           setSelectedClaim(null);
           setRemarksState('');
+          setHeldItemIndexes([]);
           setActionStatus({ type: 'idle', message: '' });
         }, 1500);
 
@@ -403,6 +427,7 @@ export default function App() {
           processedBy: c.processedBy,
           paymentRelease: c.paymentRelease,
           releasedBy: c.releasedBy,
+          holdItemIndexes: c.holdItemIndexes || [],
           items: [],
           totalAmount: 0
         };
@@ -1429,41 +1454,99 @@ export default function App() {
                 <div className="bg-slate-50 rounded p-4 text-xs space-y-2 border border-slate-200">
                   <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Employee:</strong> {selectedClaim.claimantName} ({selectedClaim.claimantEmail})</p>
                   <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block">Branch Office:</strong> {selectedClaim.branch}</p>
-                  <p><strong className="text-slate-450 uppercase text-[9px] tracking-wide block font-bold">Total Amount to Reimburse:</strong> <span className="text-slate-950 font-extrabold text-sm">₹{(selectedClaim.totalAmount || selectedClaim.amount || 0).toLocaleString('en-IN')}</span></p>
                   
-                  {/* List of items */}
-                  <div className="space-y-3 pt-2 border-t border-slate-200">
-                    <p className="font-bold text-[9px] text-slate-450 uppercase tracking-wide">Expense Items ({selectedClaim.items?.length || 1})</p>
-                    {(selectedClaim.items || [{ title: selectedClaim.title, description: selectedClaim.description, amount: selectedClaim.amount, category: selectedClaim.category, claimDate: selectedClaim.claimDate, attachmentUrl: selectedClaim.attachmentUrl }]).map((sub: any, sIdx: number) => (
-                      <div key={sIdx} className="p-2 rounded bg-white border border-slate-150 space-y-1">
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-slate-800 leading-tight block">{sub.title || "No Title"}</span>
-                          <span className="inline-block text-[8px] font-bold text-indigo-700 bg-indigo-50 px-1 border border-indigo-100 rounded">
-                            {sub.category}
-                          </span>
+                  {/* Grid of calculations */}
+                  {(() => {
+                    const originalTotal = selectedClaim.totalAmount || selectedClaim.amount || 0;
+                    const holdAmountTotal = (selectedClaim.items || []).reduce((acc: number, item: any, sIdx: number) => {
+                      if (heldItemIndexes.includes(sIdx)) {
+                        return acc + (Number(item.amount) || 0);
+                      }
+                      return acc;
+                    }, 0);
+                    const netTotal = Math.max(0, originalTotal - holdAmountTotal);
+
+                    return (
+                      <div className="grid grid-cols-3 gap-2 py-2.5 border-t border-b border-dashed border-slate-200 my-2.5 bg-slate-100/50 p-2 rounded-lg">
+                        <div className="text-center">
+                          <span className="text-[8px] text-slate-500 uppercase font-black tracking-wider block">Claim Total</span>
+                          <span className="font-extrabold text-slate-700 text-xs text-center block">₹{originalTotal.toLocaleString('en-IN')}</span>
                         </div>
-                        {sub.description && (
-                          <p className="text-[10px] text-slate-500 break-words leading-tight">{sub.description}</p>
-                        )}
-                        <div className="flex justify-between items-center text-[10px] text-slate-400 font-medium">
-                          <span>Date: {sub.claimDate}</span>
-                          <span className="font-bold text-slate-755">₹{(Number(sub.amount) || 0).toLocaleString('en-IN')}</span>
+                        <div className="text-center border-l border-r border-slate-200 bg-amber-50/50 rounded-md">
+                          <span className="text-[8px] text-amber-600 uppercase font-black tracking-wider block">On Hold</span>
+                          <span className="font-extrabold text-amber-700 text-xs text-center block">₹{holdAmountTotal.toLocaleString('en-IN')}</span>
                         </div>
-                        {sub.attachmentUrl && (
-                          <div className="pt-1">
-                            <a 
-                              href={sub.attachmentUrl} 
-                              target="_blank" 
-                              referrerPolicy="no-referrer"
-                              rel="noopener noreferrer"
-                              className="text-[10px] text-blue-600 hover:text-blue-800 underline font-semibold flex items-center gap-0.5"
-                            >
-                              View Receipt Invoice
-                            </a>
-                          </div>
-                        )}
+                        <div className="text-center">
+                          <span className="text-[8px] text-emerald-600 uppercase font-black tracking-wider block">Approved Sum</span>
+                          <span className="font-extrabold text-emerald-800 text-sm text-center block">₹{netTotal.toLocaleString('en-IN')}</span>
+                        </div>
                       </div>
-                    ))}
+                    );
+                  })()}
+
+                  {/* List of items */}
+                  <div className="space-y-3 pt-2">
+                    <p className="font-semibold text-[9.5px] text-slate-500 uppercase tracking-widest">Expense Items List ({selectedClaim.items?.length || 1})</p>
+                    {(selectedClaim.items || [{ title: selectedClaim.title, description: selectedClaim.description, amount: selectedClaim.amount, category: selectedClaim.category, claimDate: selectedClaim.claimDate, attachmentUrl: selectedClaim.attachmentUrl }]).map((sub: any, sIdx: number) => {
+                      const isHeld = heldItemIndexes.includes(sIdx);
+                      return (
+                        <div key={sIdx} className={`p-3 rounded-lg border transition-all duration-155 ${isHeld ? 'bg-amber-50/70 border-amber-200 shadow-sm ring-1 ring-amber-100/50' : 'bg-white border-slate-200'} space-y-1.5`}>
+                          <div className="flex justify-between items-start gap-2">
+                            <div className="flex-1 min-w-0">
+                              <span className={`font-black text-xs leading-tight block truncate ${isHeld ? 'text-amber-900 font-extrabold' : 'text-slate-800'}`}>
+                                {sub.title || "No Title"}
+                              </span>
+                              <span className="inline-block text-[8px] font-extrabold text-indigo-700 bg-indigo-50 px-1 py-0.5 border border-indigo-100 rounded uppercase tracking-wider mt-1">
+                                {sub.category}
+                              </span>
+                            </div>
+                            {selectedClaim.status === 'Pending' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (heldItemIndexes.includes(sIdx)) {
+                                    setHeldItemIndexes(prev => prev.filter(idx => idx !== sIdx));
+                                  } else {
+                                    setHeldItemIndexes(prev => [...prev, sIdx]);
+                                  }
+                                }}
+                                className={`shrink-0 px-2 py-1 text-[9px] font-black rounded border uppercase tracking-wider transition-all cursor-pointer ${
+                                  isHeld 
+                                    ? 'bg-amber-600 hover:bg-amber-700 border-amber-600 text-white shadow-sm' 
+                                    : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                                }`}
+                              >
+                                {isHeld ? 'On Hold' : 'Hold'}
+                              </button>
+                            ) : isHeld ? (
+                              <span className="shrink-0 px-1.5 py-0.5 text-[8px] font-black rounded bg-amber-100 text-amber-800 border border-amber-200 uppercase tracking-wide">
+                                Held
+                              </span>
+                            ) : null}
+                          </div>
+                          {sub.description && (
+                            <p className="text-[10px] text-slate-500 break-words leading-normal bg-slate-50 p-1.5 rounded">{sub.description}</p>
+                          )}
+                          <div className="flex justify-between items-center text-[10px] text-slate-400 font-semibold pt-1 border-t border-slate-100">
+                            <span>Date: {sub.claimDate}</span>
+                            <span className={`font-black ${isHeld ? 'text-amber-800 font-extrabold' : 'text-slate-800'}`}>₹{(Number(sub.amount) || 0).toLocaleString('en-IN')}</span>
+                          </div>
+                          {sub.attachmentUrl && (
+                            <div className="pt-1 flex justify-start">
+                              <a 
+                                href={sub.attachmentUrl} 
+                                target="_blank" 
+                                referrerPolicy="no-referrer"
+                                rel="noopener noreferrer"
+                                className="text-[9px] text-blue-600 hover:text-blue-800 hover:underline font-extrabold flex items-center gap-0.5"
+                              >
+                                View Attachment receipt
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1536,10 +1619,13 @@ export default function App() {
                         id="approve_claim_btn"
                         onClick={() => handleAdminAction('Approved')}
                         disabled={actionStatus.type === 'updating'}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-xs shadow transition-all flex items-center justify-center gap-1 cursor-pointer"
+                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 rounded-lg text-xs shadow transition-all flex flex-col items-center justify-center cursor-pointer px-2"
                       >
-                        <CheckCircle className="h-4 w-4" />
-                        Approve Expense & Email
+                        <div className="flex items-center gap-1 justify-center">
+                          <CheckCircle className="h-4 w-4 shrink-0 text-emerald-100" />
+                          <span className="font-extrabold uppercase tracking-wider text-[11px]">Approve & Process</span>
+                        </div>
+                        <span className="text-[8px] font-semibold text-emerald-100 leading-normal mt-0.5">(Unified Email to Accounts)</span>
                       </button>
                     </>
                   )}

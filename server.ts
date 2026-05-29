@@ -1119,29 +1119,65 @@ app.get("/api/diagnose", async (req, res) => {
 // 2. Get Claims for Admin
 app.get("/api/claims", async (req, res) => {
   const sendMappedClaims = (rawClaims: any[]) => {
-    const mapped = (rawClaims || []).map(item => ({
-      id: item.submissionid || item.id || `CLM-${Date.now()}`,
-      claimDate: item.itemdate || item.claimDate || "",
-      submitDate: item.timestamp || item.submitDate || "",
-      claimantName: item.salespersonname || item.claimantName || "",
-      claimantEmail: item.employeeemail || item.claimantEmail || item.salesperson_email || "",
-      title: item.itemremark || item.title || "Expense Claim",
-      amount: Number(item.amount) || Number(item.grandtotal) || 0,
-      category: item.expensecategory || item.category || "Other Expenses",
-      branch: item.branchname || item.branch || "",
-      description: item.itemremark || item.description || "",
-      attachmentUrl: item.attachmentlink || item.attachmentUrl || "",
-      status: item.status || "Pending",
-      remarks: item.adminremark || item.remarks || "",
-      rowIndex: item.rowIndex || 2,
-      sheetName: item.sheetName || item.branchname || item.branch || "Sheet1",
-      approved: item.approved || "No",
-      approvedDetails: item.approveddetails || item.approvedtimestamp || "",
-      paymentProcess: item.paymentprocess || "No",
-      processedBy: item.processedby || "",
-      paymentRelease: item.paymentrelease || "No",
-      releasedBy: item.releasedby || ""
-    }));
+    const mapped = (rawClaims || []).map(item => {
+      let holdItemIndexes = item.holditemindexes || item.holdItemIndexes || [];
+      if (typeof holdItemIndexes === "string") {
+        try {
+          holdItemIndexes = JSON.parse(holdItemIndexes);
+        } catch {
+          holdItemIndexes = [];
+        }
+      }
+      
+      if (Array.isArray(holdItemIndexes)) {
+        holdItemIndexes = holdItemIndexes.map(Number);
+      } else {
+        holdItemIndexes = [];
+      }
+
+      const itemSubId = item.submissionid || item.id;
+      if (itemSubId && (!holdItemIndexes || holdItemIndexes.length === 0)) {
+        const found = fallbackClaims.find(fc => fc.submissionid === itemSubId);
+        if (found) {
+          let fHold = found.holditemindexes || found.holdItemIndexes || [];
+          if (typeof fHold === "string") {
+            try {
+              fHold = JSON.parse(fHold);
+            } catch {
+              fHold = [];
+            }
+          }
+          if (Array.isArray(fHold)) {
+            holdItemIndexes = fHold.map(Number);
+          }
+        }
+      }
+
+      return {
+        id: itemSubId || `CLM-${Date.now()}`,
+        claimDate: item.itemdate || item.claimDate || "",
+        submitDate: item.timestamp || item.submitDate || "",
+        claimantName: item.salespersonname || item.claimantName || "",
+        claimantEmail: item.employeeemail || item.claimantEmail || item.salesperson_email || "",
+        title: item.itemremark || item.title || "Expense Claim",
+        amount: Number(item.amount) || Number(item.grandtotal) || 0,
+        category: item.expensecategory || item.category || "Other Expenses",
+        branch: item.branchname || item.branch || "",
+        description: item.itemremark || item.description || "",
+        attachmentUrl: item.attachmentlink || item.attachmentUrl || "",
+        status: item.status || "Pending",
+        remarks: item.adminremark || item.remarks || "",
+        rowIndex: item.rowIndex || 2,
+        sheetName: item.sheetName || item.branchname || item.branch || "Sheet1",
+        approved: item.approved || "No",
+        approvedDetails: item.approveddetails || item.approvedtimestamp || "",
+        paymentProcess: item.paymentprocess || "No",
+        processedBy: item.processedby || "",
+        paymentRelease: item.paymentrelease || "No",
+        releasedBy: item.releasedby || "",
+        holdItemIndexes
+      };
+    });
     return res.json({ success: true, claims: mapped });
   };
 
@@ -1305,7 +1341,8 @@ app.get("/api/claims", async (req, res) => {
                 status: docData.status,
                 paymentrelease: docData.status === "RELEASED" ? "Yes" : "No",
                 releasedby: docData.releasedBy || "",
-                employeeemail: docData.employeeEmail || ""
+                employeeemail: docData.employeeEmail || "",
+                holditemindexes: docData.holdItemIndexes || []
               });
             } else {
               itemsData.forEach((item: any, idx: number) => {
@@ -1333,7 +1370,8 @@ app.get("/api/claims", async (req, res) => {
                   status: docData.status,
                   paymentrelease: docData.status === "RELEASED" ? "Yes" : "No",
                   releasedby: docData.releasedBy || "",
-                  employeeemail: docData.employeeEmail || ""
+                  employeeemail: docData.employeeEmail || "",
+                  holditemindexes: docData.holdItemIndexes || []
                 });
               });
             }
@@ -1610,12 +1648,12 @@ app.post("/api/claims/action", async (req, res) => {
     const timestamp = getIndianTimestamp();
 
     let action = "REMARK";
-    if (status === "Approved") action = "APPROVE";
+    if (status === "Approved" || status === "Approved_Process") action = "APPROVE_PROCESS";
     else if (status === "Processed") action = "PROCESS";
     else if (status === "Released") action = "RELEASE";
     else if (status === "Rejected") action = "REMARK";
 
-    const mappedComment = remarks || (action === "APPROVE" ? "Approved" : status);
+    const mappedComment = remarks || (action === "APPROVE_PROCESS" ? "Approved & Processed" : status);
 
     // Update in-memory local fallback array
     fallbackClaims = fallbackClaims.map(c => {
@@ -1625,12 +1663,22 @@ app.post("/api/claims/action", async (req, res) => {
           updated.adminremark = mappedComment;
           updated.mailsent = "Yes";
           updated.status = "Rejected";
-        } else if (action === "APPROVE") {
+        } else if (action === "APPROVE_PROCESS") {
+          // Both approved and paymentprocess are marked Yes
           updated.approved = "Yes";
           updated.approvedtimestamp = `${adminName} - ${timestamp}`;
-          updated.status = "Approved";
+          updated.paymentprocess = "Yes";
+          updated.processedby = `${adminName} - ${timestamp}`;
+          updated.status = "Payment Process On Going";
           updated.adminremark = mappedComment;
           updated.mailsent = "Yes";
+          
+          if (req.body.amount !== undefined) {
+            updated.amount = Number(req.body.amount);
+            updated.grandtotal = String(req.body.amount);
+          }
+
+          updated.holdItemIndexes = req.body.holdItemIndexes || [];
         } else if (action === "PROCESS") {
           updated.paymentprocess = "Yes";
           updated.processedby = `${adminName} - ${timestamp}`;
@@ -1656,12 +1704,18 @@ app.post("/api/claims/action", async (req, res) => {
           updateData.adminRemark = mappedComment;
           updateData.status = "REJECTED";
           updateData.mailSent = true;
-        } else if (action === "APPROVE") {
-          updateData.status = "APPROVED";
+        } else if (action === "APPROVE_PROCESS") {
+          updateData.status = "Payment Process On Going";
           updateData.approvedAt = getFirebaseServerTimestamp();
           updateData.approvedBy = `${adminName} (${adminEmail})`;
+          updateData.processedBy = `${adminName} (${adminEmail})`;
+          updateData.processedAt = getFirebaseServerTimestamp();
           updateData.adminRemark = mappedComment;
           updateData.mailSent = true;
+          updateData.holdItemIndexes = req.body.holdItemIndexes || [];
+          if (req.body.amount !== undefined) {
+            updateData.grandTotal = Number(req.body.amount);
+          }
         } else if (action === "PROCESS") {
           updateData.status = "Payment Process On Going";
           updateData.processedBy = `${adminName} (${adminEmail})`;
@@ -1685,12 +1739,18 @@ app.post("/api/claims/action", async (req, res) => {
           updateFields.adminremark = mappedComment;
           updateFields.mailsent = "Yes";
           updateFields.status = "Rejected";
-        } else if (action === "APPROVE") {
+        } else if (action === "APPROVE_PROCESS") {
           updateFields.approved = "Yes";
           updateFields.approvedtimestamp = `${adminName} - ${timestamp}`;
-          updateFields.status = "Approved";
+          updateFields.paymentprocess = "Yes";
+          updateFields.processedby = `${adminName} - ${timestamp}`;
+          updateFields.status = "Payment Process On Going";
           updateFields.adminremark = mappedComment;
           updateFields.mailsent = "Yes";
+          if (req.body.amount !== undefined) {
+             updateFields.amount = Number(req.body.amount);
+             updateFields.grandtotal = String(req.body.amount);
+          }
         } else if (action === "PROCESS") {
           updateFields.paymentprocess = "Yes";
           updateFields.processedby = `${adminName} - ${timestamp}`;
@@ -1727,23 +1787,69 @@ app.post("/api/claims/action", async (req, res) => {
           valueInputOption: "USER_ENTERED",
           requestBody: { values: [["Rejected"]] },
         });
-      } else if (action === "APPROVE") {
-        // Update Column M (Admin Remark), N (Mail Sent), O (Approved), P (Approved Timestamp) all at once
-        const range = `${targetSheet}!M${rowIndex}:P${rowIndex}`;
+      } else if (action === "APPROVE_PROCESS") {
+        // If amount was adjusted
+        if (req.body.amount !== undefined) {
+          const amtRange = `${targetSheet}!L${rowIndex}`;
+          await sheets.spreadsheets.values.update({
+            spreadsheetId: SHEET_ID,
+            range: amtRange,
+            valueInputOption: "USER_ENTERED",
+            requestBody: { values: [[String(req.body.amount)]] },
+          });
+        }
+
+        // Highlight held items in Google Sheets to a beautiful warm yellow
+        const holdItemIndexes = req.body.holdItemIndexes || [];
+        if (holdItemIndexes && holdItemIndexes.length > 0) {
+          try {
+            const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
+            const sheet = spreadsheet.data.sheets?.find(s => s.properties?.title === targetSheet);
+            const sheetId = sheet?.properties?.sheetId;
+
+            if (sheetId !== undefined) {
+              const requests = holdItemIndexes.map((sIdx: number) => {
+                const itemRowIndex = rowIndex + sIdx - 1; // 0-indexed row index
+                return {
+                  repeatCell: {
+                    range: {
+                      sheetId: sheetId,
+                      startRowIndex: itemRowIndex,
+                      endRowIndex: itemRowIndex + 1,
+                      startColumnIndex: 0,
+                      endColumnIndex: 21 // highlight columns A through U
+                    },
+                    cell: {
+                      userEnteredFormat: {
+                        backgroundColor: {
+                          red: 254 / 255,
+                          green: 243 / 255,
+                          blue: 199 / 255
+                        }
+                      }
+                    },
+                    fields: "userEnteredFormat.backgroundColor"
+                  }
+                };
+              });
+
+              await sheets.spreadsheets.batchUpdate({
+                spreadsheetId: SHEET_ID,
+                requestBody: { requests }
+              });
+            }
+          } catch (colorError: any) {
+            console.error("Failed to color Google Spreadsheet row(s) to yellow:", colorError.message);
+          }
+        }
+
+        // Update M to S (Admin Remark, Mail Sent, Approved, Approved Details, Payment Process, Processed By, Status)
+        const range = `${targetSheet}!M${rowIndex}:S${rowIndex}`;
         await sheets.spreadsheets.values.update({
           spreadsheetId: SHEET_ID,
           range: range,
           valueInputOption: "USER_ENTERED",
-          requestBody: { values: [[mappedComment, "Yes", "Yes", `${adminName} - ${timestamp}`]] },
-        });
-
-        // Column S - Status state
-        const statusRange = `${targetSheet}!S${rowIndex}`;
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SHEET_ID,
-          range: statusRange,
-          valueInputOption: "USER_ENTERED",
-          requestBody: { values: [["Approved"]] },
+          requestBody: { values: [[mappedComment, "Yes", "Yes", `${adminName} - ${timestamp}`, "Yes", `${adminName} - ${timestamp}`, "Payment Process On Going"]] },
         });
       } else if (action === "PROCESS") {
         // Column Q (Payment Process), R (Processed By), S (Status Log)
@@ -1828,14 +1934,146 @@ app.post("/api/claims/action", async (req, res) => {
           adminName,
           adminEmail
         );
-      } else if (action === "APPROVE") {
-        const remarkString = mappedComment && mappedComment !== "Approved" ? `\n\nAdministrative Remarks:\n"${mappedComment}"` : "";
-        const mailBody = `Dear ${employeeName},\n\nYour claims submission with ID: ${id} of ₹${amount} was APPROVED successfully by Admin.${remarkString}\n\nApproved Date: ${timestamp}\n\nPortal Link: https://expenses-form-one.vercel.app/\n\nThank you,\nExpense Department`;
+      } else if (action === "APPROVE_PROCESS") {
+        const holdItemIndexes = req.body.holdItemIndexes || [];
+        const originalAmount = req.body.originalAmount || amount;
+        const finalAmount = req.body.amount || amount;
+        
+        let itemsList = fallbackClaims.filter(c => c.submissionid === id).map(item => ({
+          title: item.itemremark || item.title || "Expense Item",
+          category: item.expensecategory || item.category || "General",
+          amount: Number(item.amount) || 0,
+          claimDate: item.itemdate || item.claimDate || "N/A",
+          description: item.itemremark || item.description || ""
+        }));
+
+        if (itemsList.length === 0) {
+          itemsList = [{
+            title: expenseTitle,
+            category,
+            amount: Number(amount),
+            claimDate,
+            description: claimDescription
+          }];
+        }
+
+        const holdAmountTotal = itemsList.reduce((acc, item, sIdx) => {
+          if (holdItemIndexes.includes(sIdx)) {
+            return acc + (Number(item.amount) || 0);
+          }
+          return acc;
+        }, 0);
+
+        const itemsBreakdownHtml = itemsList.map((sub: any, sIdx: number) => {
+          const isHeld = holdItemIndexes.includes(sIdx);
+          return `
+          <div style="border: 1px solid ${isHeld ? '#fcd34d' : '#e2e8f0'}; background-color: ${isHeld ? '#fef3c7' : '#ffffff'}; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="font-weight: bold; font-size: 13px; color: ${isHeld ? '#92400e' : '#1e293b'};">
+                  ${sub.title || 'Expense Item'}
+                  ${isHeld ? ' <span style="background-color: #fef08a; color: #854d0e; border: 1px solid #fde047; padding: 2px 5px; font-size: 9px; font-weight: bold; border-radius: 3px; margin-left: 5px; text-transform: uppercase;">[ON HOLD]</span>' : ''}
+                </td>
+                <td style="font-weight: bold; font-size: 13px; color: #0f172a; text-align: right; width: 100px;">
+                  ₹${Number(sub.amount || 0).toLocaleString('en-IN')}
+                </td>
+              </tr>
+            </table>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              <span>Category: ${sub.category || "General"}</span> &bull; 
+              <span>Date: ${sub.claimDate || "N/A"}</span>
+            </div>
+            ${sub.description && sub.description !== sub.title ? `<div style="font-size: 11px; color: #475569; font-style: italic; margin-top: 4px;">Note: ${sub.description}</div>` : ''}
+          </div>
+          `;
+        }).join('');
+
+        const htmlBody = `
+<div style="font-family: Arial, sans-serif; max-width: 650px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+  <div style="background-color: #4f46e5; color: white; padding: 20px; font-size: 18px; font-weight: bold; text-align: center; letter-spacing: 0.5px;">
+    APPROVED & PAYMENT PROCESSING REQUEST
+  </div>
+  <div style="padding: 24px; color: #1e293b; line-height: 1.6;">
+    <p>Dear Accounts Team,</p>
+    <p>The following expense claim has been <strong>Approved</strong> by Admin and is hereby forwarded for payment processing.</p>
+    
+    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+      <h4 style="margin: 0 0 10px 0; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px; font-size: 13px;">Claimant Information</h4>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="color: #64748b; padding: 4px 0; width: 120px;"><strong>Employee Check:</strong></td>
+          <td style="color: #0f172a; padding: 4px 0;"><strong>${employeeName}</strong> (${employeeEmail})</td>
+        </tr>
+        <tr>
+          <td style="color: #64748b; padding: 4px 0;"><strong>Branch Office:</strong></td>
+          <td style="color: #0f172a; padding: 4px 0;">${claimBranch}</td>
+        </tr>
+        <tr>
+          <td style="color: #64748b; padding: 4px 0;"><strong>Submission ID:</strong></td>
+          <td style="color: #0f172a; padding: 4px 0; font-family: monospace;">${id}</td>
+        </tr>
+      </table>
+    </div>
+
+    <h4 style="margin: 20px 0 10px 0; color: #1e293b; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; font-size: 14px;">Expense Breakdown</h4>
+    <div>
+      ${itemsBreakdownHtml}
+    </div>
+
+    <div style="margin-top: 20px; border-top: 2px solid #cbd5e1; padding-top: 10px; font-size: 13px;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="color: #64748b; padding: 4px 0;">Original Grand Total:</td>
+          <td style="text-align: right; color: #475569; padding: 4px 0;">₹${Number(originalAmount).toLocaleString('en-IN')}</td>
+        </tr>
+        ${holdItemIndexes && holdItemIndexes.length > 0 ? `
+        <tr>
+          <td style="color: #b91c1c; padding: 4px 0; font-weight: bold;">Less: Held Items Total:</td>
+          <td style="text-align: right; color: #b91c1c; font-weight: bold; padding: 4px 0;">- ₹${Number(holdAmountTotal).toLocaleString('en-IN')}</td>
+        </tr>
+        ` : ''}
+        <tr style="background-color: #f1f5f9; font-size: 15px;">
+          <td style="padding: 10px; color: #0f172a; font-weight: bold;">Net Remittance / Process Amount:</td>
+          <td style="padding: 10px; text-align: right; color: #4f46e5; font-weight: 800; font-size: 18px;">₹${Number(finalAmount).toLocaleString('en-IN')}</td>
+        </tr>
+      </table>
+    </div>
+
+    ${mappedComment && mappedComment !== "Approved" && mappedComment !== "Approved & Processed" ? `
+    <div style="margin-top: 15px; padding: 12px; background-color: #fffbeb; border-left: 4px solid #f59e0b; font-size: 12px; color: #78350f;">
+      <strong>Admin Message/Remarks:</strong><br/>
+      "${mappedComment}"
+    </div>
+    ` : ''}
+
+    ${attachmentHtml}
+
+    <p style="margin-top: 20px;"><strong>Expense Claim Portal:</strong> <a href="https://expenses-form-one.vercel.app/" style="color: #4f46e5; text-decoration: underline;" target="_blank">Access Claim Portal</a></p>
+
+    <div style="margin-top: 24px; padding: 12px; border-left: 4px solid #4f46e5; background-color: #f5f3ff; font-size: 13px; color: #3730a3;">
+      <strong>Actioned By:</strong> ${adminName}<br/>
+      <strong>Status:</strong> Approved & Forwarded to Accounts for Reimbursement<br/>
+      <strong>Date Authorized:</strong> ${timestamp}
+    </div>
+  </div>
+</div>`;
+
+        const ccEmails = [
+          employeeEmail,
+          bHeadEmail,
+          "ea.mumbai@ginzalimited.com",
+          "mis.mumbai@ginzalimited.com",
+          "arvind.sethia@ginzalimited.com",
+          "rohit.sethia@ginzalimited.com"
+        ].filter(e => e && e.trim() !== "");
+        const uniqueCC = Array.from(new Set(ccEmails)).filter(e => e.toLowerCase() !== accountsMail.toLowerCase());
+        const ccString = uniqueCC.join(",");
+
         await sendMail(
-          targetClaimant,
-          `${adminEmails},${bHeadEmail}`,
-          `APPROVED: Expense Claim Update (${id})`,
-          mailBody,
+          accountsMail,
+          ccString,
+          `APPROVED & PAYMENT PROCESSING REQUEST: ${id}`,
+          htmlBody,
           adminName,
           adminEmail
         );
