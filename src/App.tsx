@@ -1270,30 +1270,36 @@ export default function App() {
                                                     setSelectedClaim(item);
                                                     setRemarksState(item.remarks || '');
                                                   }}
-                                                  className={`py-1 px-2 rounded font-semibold text-[10px] shadow-sm transition-all cursor-pointer ${
+                                                  className={`h-[34px] px-4 rounded-md font-extrabold text-[11px] shadow-sm hover:shadow-md transition-all duration-150 cursor-pointer inline-flex items-center justify-center text-center uppercase tracking-wider hover:-translate-y-0.5 active:translate-y-0 ${
                                                     item.status === 'Pending'
-                                                      ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-900 border border-indigo-200'
+                                                      ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-0'
                                                       : item.status === 'Approved'
-                                                      ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200'
+                                                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-0'
                                                       : (item.status === 'Processed' || item.status === 'Payment Process On Going')
-                                                      ? 'bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-900 border border-purple-200'
-                                                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200'
+                                                      ? 'bg-blue-600 hover:bg-blue-700 text-white border-0'
+                                                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-800 border border-slate-350'
                                                   }`}
                                                 >
-                                                  {item.status === 'Pending' && 'Resolve'}
+                                                  {item.status === 'Pending' && (
+                                                    <span className="flex items-center gap-1.5 justify-center">
+                                                      <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
+                                                      Resolve
+                                                    </span>
+                                                  )}
                                                   {item.status === 'Approved' && 'Process'}
                                                   {(item.status === 'Processed' || item.status === 'Payment Process On Going') && 'Release'}
                                                   {(item.status === 'Released' || item.status === 'Rejected') && 'View'}
                                                 </button>
 
                                                 {deleteConfirmId === item.id ? (
-                                                  <div className="flex items-center gap-1 bg-rose-50 px-1 py-0.5 rounded border border-rose-200 animate-fade-in">
+                                                  <div className="flex items-center gap-1 bg-rose-50 px-1.5 rounded-md border border-rose-250 animate-fade-in h-[34px]">
+                                                    <span className="text-[9px] font-bold text-rose-700 px-1">Delete?</span>
                                                     <button
                                                       onClick={(e) => {
                                                         e.stopPropagation();
                                                         setDeleteConfirmId(null);
                                                       }}
-                                                      className="px-1.5 py-0.5 text-[9px] hover:bg-rose-105 text-slate-600 rounded transition-all cursor-pointer font-bold"
+                                                      className="px-2 py-1 text-[9px] hover:bg-rose-100 text-slate-600 rounded font-black cursor-pointer transition-all"
                                                       title="Cancel deletion"
                                                     >
                                                       No
@@ -1328,7 +1334,7 @@ export default function App() {
                                                           setActionStatus({ type: 'error', message: err.message });
                                                         }
                                                       }}
-                                                      className="px-1.5 py-0.5 text-[9px] bg-rose-600 hover:bg-rose-700 text-white rounded transition-all cursor-pointer font-bold"
+                                                      className="px-2 py-1 text-[9px] bg-rose-600 hover:bg-rose-700 text-white rounded font-black cursor-pointer transition-all"
                                                       title="Confirm permanent delete"
                                                     >
                                                       Yes
@@ -1341,9 +1347,9 @@ export default function App() {
                                                       setDeleteConfirmId(item.id);
                                                     }}
                                                     title="Permanently Delete Claim"
-                                                    className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-650 hover:text-rose-800 border border-rose-250 rounded cursor-pointer transition-all flex items-center justify-center animate-pulse"
+                                                    className="h-[34px] w-[34px] bg-rose-50 hover:bg-rose-100 text-rose-650 hover:text-rose-800 border border-rose-250 rounded-md cursor-pointer transition-all flex items-center justify-center animate-pulse"
                                                   >
-                                                    <Trash2 className="h-3 w-3" />
+                                                    <Trash2 className="h-3.5 w-3.5" />
                                                   </button>
                                                 )}
                                               </div>
