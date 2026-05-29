@@ -1098,204 +1098,264 @@ export default function App() {
                       <div className="overflow-x-auto rounded-lg border border-slate-200">
                         <table className="w-full text-left border-collapse text-xs">
                           <thead>
-                            <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                            <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
                               <th className="py-3 px-4">Claim ID</th>
                               <th className="py-3 px-4">Claimant Info</th>
-                              <th className="py-3 px-4">Details</th>
-                              <th className="py-3 px-4">Amount</th>
-                              <th className="py-3 px-4">Dates</th>
+                              <th className="py-3 px-4">Expense Details</th>
+                              <th className="py-3 px-4 text-right">Item Amt</th>
+                              <th className="py-3 px-4">Txn Date</th>
                               <th className="py-3 px-4">Receipt</th>
+                              <th className="py-3 px-4 text-right">Grand Total</th>
+                              <th className="py-3 px-4">Submitted At</th>
                               <th className="py-3 px-4">Status & Action</th>
                             </tr>
                           </thead>
-                           <tbody className="divide-y divide-slate-200 bg-white">
-                            {filteredClaims.map((item, idx) => (
-                              <tr key={`${item.id}-${idx}`} className="hover:bg-slate-50 border-b border-rose-100/30">
-                                
-                                <td className="py-3.5 px-4 font-bold text-slate-900 font-mono whitespace-nowrap">
-                                  {item.id}
-                                </td>
+                          <tbody className="divide-y divide-slate-200 bg-white">
+                            {filteredClaims.map((item, idx) => {
+                              const subItems = (item.items && item.items.length > 0) ? item.items : [{}];
+                              const rowSpanVal = subItems.length;
 
-                                <td className="py-3.5 px-4">
-                                  <div>
-                                    <p className="font-bold text-slate-800 leading-tight">{item.claimantName}</p>
-                                    <p className="text-[10px] text-slate-500">{item.claimantEmail}</p>
-                                    <span className="inline-block mt-1 font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-full text-[9px] border border-slate-200">
-                                      {item.branch}
-                                    </span>
-                                  </div>
-                                </td>
+                              return (
+                                <React.Fragment key={`${item.id}-${idx}`}>
+                                  {subItems.map((sub: any, sIdx: number) => {
+                                    const isLastSub = sIdx === rowSpanVal - 1;
+                                    const bgClass = idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40';
 
-                                <td className="py-3.5 px-4">
-                                  <div className="max-w-md space-y-2">
-                                    {(item.items || []).map((sub: any, sIdx: number) => (
-                                      <div key={sIdx} className="p-2 rounded bg-slate-50/70 border border-slate-200/60 font-medium space-y-1">
-                                        <div className="flex justify-between items-start gap-1.5">
-                                          <span className="font-bold text-slate-850 leading-tight block">{sub.title || "No Title"}</span>
-                                          <span className="inline-block text-[8px] font-black text-indigo-700 bg-indigo-50 px-1 border border-indigo-150/50 rounded">
-                                            {sub.category}
-                                          </span>
-                                        </div>
-                                        {sub.description && (
-                                          <p className="text-[10px] text-slate-450 break-words leading-tight">{sub.description}</p>
-                                        )}
-                                        <div className="flex justify-between items-center text-[9px] text-slate-400 font-bold border-t border-slate-100 pt-1 mt-1">
-                                          <span>Date: {sub.claimDate}</span>
-                                          <span className="font-semibold text-slate-600">₹{(Number(sub.amount) || 0).toLocaleString('en-IN')}</span>
-                                        </div>
-                                      </div>
-                                    ))}
-                                    {item.remarks && (
-                                      <p className="text-[10px] text-slate-650 bg-amber-50/50 p-2 rounded italic mt-1 border-l-2 border-amber-350 leading-relaxed">
-                                        Admin: {item.remarks}
-                                      </p>
-                                    )}
-                                  </div>
-                                </td>
-
-                                <td className="py-3.5 px-4 font-black text-slate-900 whitespace-nowrap text-sm text-right bg-slate-50/30">
-                                  <div className="pr-2">
-                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">Grand Total</p>
-                                    <p className="text-xs font-black text-blue-700 mt-1">₹{(item.totalAmount || 0).toLocaleString('en-IN')}</p>
-                                  </div>
-                                </td>
-
-                                <td className="py-3.5 px-4 whitespace-nowrap text-slate-650 font-medium">
-                                  <div>
-                                    <p className="leading-none text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Submitted</p>
-                                    <p className="font-semibold">{item.submitDate}</p>
-                                  </div>
-                                </td>
-
-                                <td className="py-3.5 px-4">
-                                  <div className="flex flex-col gap-1 max-w-[120px]">
-                                    {(item.items || []).map((sub: any, sIdx: number) => {
-                                      if (!sub.attachmentUrl) return null;
-                                      return (
-                                        <a 
-                                          key={sIdx}
-                                          href={sub.attachmentUrl} 
-                                          target="_blank" 
-                                          referrerPolicy="no-referrer"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center gap-1 font-bold text-blue-600 hover:text-blue-800 hover:underline text-[9px] bg-blue-50/60 border border-blue-150 py-0.5 px-1.5 rounded truncate"
-                                          title={`View receipt for ${sub.title}`}
-                                        >
-                                          <Upload className="h-2.5 w-2.5 flex-shrink-0 text-blue-500" />
-                                          Receipt #{sIdx + 1}
-                                        </a>
-                                      );
-                                    })}
-                                    {!(item.items || []).some((sub: any) => sub.attachmentUrl) && (
-                                      <span className="text-[10px] text-slate-400 italic">No receipts</span>
-                                    )}
-                                  </div>
-                                </td>
-
-                                 <td className="py-3.5 px-4">
-                                  <div className="space-y-1.5">
-                                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                      item.status === 'Approved' 
-                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-250' 
-                                        : (item.status === 'Processed' || item.status === 'Payment Process On Going')
-                                        ? 'bg-blue-50 text-blue-700 border-blue-250'
-                                        : item.status === 'Released'
-                                        ? 'bg-purple-50 text-purple-750 border-purple-250'
-                                        : item.status === 'Rejected' 
-                                        ? 'bg-rose-50 text-rose-700 border-rose-250' 
-                                        : 'bg-amber-50 text-amber-700 border-amber-250'
-                                    }`}>
-                                      {item.status || 'Pending'}
-                                    </span>
-                                    
-                                    <div className="flex items-center gap-1.5">
-                                      <button 
-                                        onClick={() => {
-                                          setSelectedClaim(item);
-                                          setRemarksState(item.remarks || '');
-                                        }}
-                                        className={`py-1 px-2 rounded font-semibold text-[10px] shadow-sm transition-all cursor-pointer ${
-                                          item.status === 'Pending'
-                                            ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-900 border border-indigo-200'
-                                            : item.status === 'Approved'
-                                            ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200'
-                                            : (item.status === 'Processed' || item.status === 'Payment Process On Going')
-                                            ? 'bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-900 border border-purple-200'
-                                            : 'bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200'
+                                    return (
+                                      <tr 
+                                        key={`${item.id}-sub-${sIdx}`} 
+                                        className={`${bgClass} hover:bg-slate-100/65 transition-colors align-top ${
+                                          isLastSub ? 'border-b-2 border-slate-250' : 'border-b border-slate-100/60'
                                         }`}
                                       >
-                                        {item.status === 'Pending' && 'Resolve'}
-                                        {item.status === 'Approved' && 'Process'}
-                                        {(item.status === 'Processed' || item.status === 'Payment Process On Going') && 'Release'}
-                                        {(item.status === 'Released' || item.status === 'Rejected') && 'View'}
-                                      </button>
-
-                                      {deleteConfirmId === item.id ? (
-                                        <div className="flex items-center gap-1 bg-rose-50 px-1 py-0.5 rounded border border-rose-200">
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setDeleteConfirmId(null);
-                                            }}
-                                            className="px-1 text-[9px] hover:bg-rose-100 text-slate-600 rounded transition-all cursor-pointer font-bold"
-                                            title="Cancel deletion"
+                                        {/* 1. Claim ID (RowSpan) */}
+                                        {sIdx === 0 && (
+                                          <td 
+                                            rowSpan={rowSpanVal} 
+                                            className="py-4 px-4 font-bold text-slate-900 font-mono whitespace-nowrap border-r border-slate-100 text-[11px] align-top bg-slate-50/20"
                                           >
-                                            No
-                                          </button>
-                                          <button
-                                            onClick={async (e) => {
-                                              e.stopPropagation();
-                                              setDeleteConfirmId(null);
-                                              setActionStatus({ type: 'updating', message: `Permanently deleting claim ${item.id}...` });
-                                              try {
-                                                const response = await fetch('/api/admin/claims/delete', {
-                                                  method: 'POST',
-                                                  headers: { 'Content-Type': 'application/json' },
-                                                  body: JSON.stringify({
-                                                    claimId: item.id,
-                                                    sheetName: (item as any).sheetName || item.branch
-                                                  })
-                                                });
-                                                const resData = await response.json();
-                                                if (resData.success) {
-                                                  let msg = 'Successfully deleted the claim.';
-                                                  if (resData.sheetsWarning) {
-                                                    msg += ` Note: Google Sheets warning - ${resData.sheetsWarning}. Please ensure your service account has Editor access to the spreadsheet.`;
-                                                  }
-                                                  setActionStatus({ type: 'success', message: msg });
-                                                  setTimeout(() => setActionStatus({ type: 'idle', message: '' }), 3500);
-                                                  fetchClaims();
-                                                } else {
-                                                  setActionStatus({ type: 'error', message: resData.error || 'Failed to delete.' });
-                                                }
-                                              } catch (err: any) {
-                                                setActionStatus({ type: 'error', message: err.message });
-                                              }
-                                            }}
-                                            className="px-1 text-[9px] bg-rose-600 hover:bg-rose-700 text-white rounded transition-all cursor-pointer font-bold"
-                                            title="Confirm permanent delete"
-                                          >
-                                            Yes
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setDeleteConfirmId(item.id);
-                                          }}
-                                          title="Permanently Delete Claim"
-                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-650 hover:text-rose-800 border border-rose-250 rounded cursor-pointer transition-all flex items-center justify-center animate-pulse"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                </td>
+                                            {item.id}
+                                          </td>
+                                        )}
 
-                              </tr>
-                            ))}
+                                        {/* 2. Claimant Info (RowSpan) */}
+                                        {sIdx === 0 && (
+                                          <td 
+                                            rowSpan={rowSpanVal} 
+                                            className="py-4 px-4 border-r border-slate-100 align-top"
+                                          >
+                                            <div className="space-y-1">
+                                              <p className="font-extrabold text-slate-800 leading-tight">{item.claimantName}</p>
+                                              <p className="text-[10px] text-slate-500 leading-none">{item.claimantEmail}</p>
+                                              <span className="inline-block mt-1 font-bold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-full text-[9px] border border-slate-200">
+                                                {item.branch}
+                                              </span>
+                                            </div>
+                                          </td>
+                                        )}
+
+                                        {/* 3. Expense Details (Single Row) */}
+                                        <td className="py-4 px-4 max-w-xs md:max-w-md">
+                                          <div className="space-y-1">
+                                            <div className="flex items-center gap-2">
+                                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-indigo-50 border border-indigo-200 text-indigo-700">
+                                                {sub.category || "General"}
+                                              </span>
+                                              <span className="font-bold text-slate-800 leading-tight">
+                                                {sub.title || "No Title"}
+                                              </span>
+                                            </div>
+                                            {sub.description && (
+                                              <p className="text-[10px] text-slate-500 font-medium break-words max-w-xs leading-tight">{sub.description}</p>
+                                            )}
+                                            
+                                            {/* For travelers: route details */}
+                                            {(sub.category === 'Travel' && (sub.origin || sub.destination)) && (
+                                              <div className="text-[9px] text-slate-450 bg-slate-100/50 p-1.5 rounded border border-slate-200/50 mt-1 inline-block">
+                                                <span className="font-semibold text-slate-600 font-sans">Route:</span> {sub.origin || '-'} ➔ {sub.destination || '-'}
+                                                {sub.distance && ` (${sub.distance} km)`}
+                                              </div>
+                                            )}
+
+                                            {/* Admin response log remarks in sIdx === 0 */}
+                                            {sIdx === 0 && item.remarks && (
+                                              <p className="text-[10px] text-slate-650 bg-amber-50/50 p-2 rounded italic mt-2 border-l-2 border-amber-300 leading-normal max-w-sm">
+                                                <strong>Admin:</strong> {item.remarks}
+                                              </p>
+                                            )}
+                                          </div>
+                                        </td>
+
+                                        {/* 4. Item Amt (Single Row) */}
+                                        <td className="py-4 px-4 font-bold text-slate-800 whitespace-nowrap text-right">
+                                          ₹{(Number(sub.amount) || 0).toLocaleString('en-IN')}
+                                        </td>
+
+                                        {/* 5. Txn Date (Single Row) */}
+                                        <td className="py-4 px-4 text-slate-550 font-medium whitespace-nowrap">
+                                          {sub.claimDate || item.submitDate || '-'}
+                                        </td>
+
+                                        {/* 6. Receipt (Single Row) */}
+                                        <td className="py-4 px-4">
+                                          {sub.attachmentUrl ? (
+                                            <a 
+                                              href={sub.attachmentUrl} 
+                                              target="_blank" 
+                                              referrerPolicy="no-referrer"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1 font-bold text-blue-600 hover:text-blue-800 hover:underline text-[10px] bg-blue-50 border border-blue-200 py-1 px-2 rounded tracking-wide transition-all"
+                                              title={`View receipt for ${sub.title || 'item'}`}
+                                            >
+                                              <Upload className="h-3 w-3 text-blue-500" />
+                                              Receipt
+                                            </a>
+                                          ) : (
+                                            <span className="text-[10px] text-slate-400 italic font-medium">No receipt</span>
+                                          )}
+                                        </td>
+
+                                        {/* 7. Grand Total (RowSpan) */}
+                                        {sIdx === 0 && (
+                                          <td 
+                                            rowSpan={rowSpanVal} 
+                                            className="py-4 px-4 font-black whitespace-nowrap text-right bg-slate-50/30 border-l border-slate-100 align-top"
+                                          >
+                                            <div className="pr-1">
+                                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">Grand Total</p>
+                                              <p className="text-xs font-black text-blue-700 mt-1">₹{(item.totalAmount || 0).toLocaleString('en-IN')}</p>
+                                            </div>
+                                          </td>
+                                        )}
+
+                                        {/* 8. Submitted Date (RowSpan) */}
+                                        {sIdx === 0 && (
+                                          <td 
+                                            rowSpan={rowSpanVal} 
+                                            className="py-4 px-4 whitespace-nowrap text-slate-600 font-semibold border-l border-slate-100 align-top"
+                                          >
+                                            <div>
+                                              <p className="leading-none text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Submitted</p>
+                                              <p className="font-semibold text-[11px] text-slate-700">{item.submitDate}</p>
+                                            </div>
+                                          </td>
+                                        )}
+
+                                        {/* 9. Status & Action (RowSpan) */}
+                                        {sIdx === 0 && (
+                                          <td 
+                                            rowSpan={rowSpanVal} 
+                                            className="py-4 px-4 border-l border-slate-100 align-top"
+                                          >
+                                            <div className="space-y-2">
+                                              <div>
+                                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border leading-none ${
+                                                  item.status === 'Approved' 
+                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-250' 
+                                                    : (item.status === 'Processed' || item.status === 'Payment Process On Going')
+                                                    ? 'bg-blue-50 text-blue-700 border-blue-250'
+                                                    : item.status === 'Released'
+                                                    ? 'bg-purple-50 text-purple-755 border-purple-250'
+                                                    : item.status === 'Rejected' 
+                                                    ? 'bg-rose-50 text-rose-700 border-rose-250' 
+                                                    : 'bg-amber-50 text-amber-700 border-amber-250'
+                                                }`}>
+                                                  {item.status || 'Pending'}
+                                                </span>
+                                              </div>
+                                              
+                                              <div className="flex items-center gap-1.5 flex-wrap">
+                                                <button 
+                                                  onClick={() => {
+                                                    setSelectedClaim(item);
+                                                    setRemarksState(item.remarks || '');
+                                                  }}
+                                                  className={`py-1 px-2 rounded font-semibold text-[10px] shadow-sm transition-all cursor-pointer ${
+                                                    item.status === 'Pending'
+                                                      ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-900 border border-indigo-200'
+                                                      : item.status === 'Approved'
+                                                      ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200'
+                                                      : (item.status === 'Processed' || item.status === 'Payment Process On Going')
+                                                      ? 'bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-900 border border-purple-200'
+                                                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200'
+                                                  }`}
+                                                >
+                                                  {item.status === 'Pending' && 'Resolve'}
+                                                  {item.status === 'Approved' && 'Process'}
+                                                  {(item.status === 'Processed' || item.status === 'Payment Process On Going') && 'Release'}
+                                                  {(item.status === 'Released' || item.status === 'Rejected') && 'View'}
+                                                </button>
+
+                                                {deleteConfirmId === item.id ? (
+                                                  <div className="flex items-center gap-1 bg-rose-50 px-1 py-0.5 rounded border border-rose-200 animate-fade-in">
+                                                    <button
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setDeleteConfirmId(null);
+                                                      }}
+                                                      className="px-1.5 py-0.5 text-[9px] hover:bg-rose-105 text-slate-600 rounded transition-all cursor-pointer font-bold"
+                                                      title="Cancel deletion"
+                                                    >
+                                                      No
+                                                    </button>
+                                                    <button
+                                                      onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        setDeleteConfirmId(null);
+                                                        setActionStatus({ type: 'updating', message: `Permanently deleting claim ${item.id}...` });
+                                                        try {
+                                                          const response = await fetch('/api/admin/claims/delete', {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({
+                                                              claimId: item.id,
+                                                              sheetName: (item as any).sheetName || item.branch
+                                                            })
+                                                          });
+                                                          const resData = await response.json();
+                                                          if (resData.success) {
+                                                            let msg = 'Successfully deleted the claim.';
+                                                            if (resData.sheetsWarning) {
+                                                              msg += ` Note: Google Sheets warning - ${resData.sheetsWarning}. Please ensure your service account has Editor access to the spreadsheet.`;
+                                                            }
+                                                            setActionStatus({ type: 'success', message: msg });
+                                                            setTimeout(() => setActionStatus({ type: 'idle', message: '' }), 3500);
+                                                            fetchClaims();
+                                                          } else {
+                                                            setActionStatus({ type: 'error', message: resData.error || 'Failed to delete.' });
+                                                          }
+                                                        } catch (err: any) {
+                                                          setActionStatus({ type: 'error', message: err.message });
+                                                        }
+                                                      }}
+                                                      className="px-1.5 py-0.5 text-[9px] bg-rose-600 hover:bg-rose-700 text-white rounded transition-all cursor-pointer font-bold"
+                                                      title="Confirm permanent delete"
+                                                    >
+                                                      Yes
+                                                    </button>
+                                                  </div>
+                                                ) : (
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      setDeleteConfirmId(item.id);
+                                                    }}
+                                                    title="Permanently Delete Claim"
+                                                    className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-650 hover:text-rose-800 border border-rose-250 rounded cursor-pointer transition-all flex items-center justify-center animate-pulse"
+                                                  >
+                                                    <Trash2 className="h-3 w-3" />
+                                                  </button>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </td>
+                                        )}
+                                      </tr>
+                                    );
+                                  })}
+                                </React.Fragment>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
