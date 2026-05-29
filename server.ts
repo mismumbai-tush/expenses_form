@@ -572,6 +572,58 @@ const saveEmailMapping = async (sheets: any, spreadsheetId: string, submissionId
   });
 };
 
+const mergeColumnsForSubmission = async (sheets: any, spreadsheetId: string, sheetTitle: string, submissionId: string) => {
+  try {
+    const sheetValuesResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${sheetTitle}!A:B`
+    });
+    const rows = sheetValuesResponse.data.values || [];
+    let startRowIndex = -1;
+    let endRowIndex = -1;
+
+    for (let idx = 0; idx < rows.length; idx++) {
+      if (rows[idx] && (rows[idx][1] === submissionId || rows[idx][0] === submissionId)) {
+        if (startRowIndex === -1) {
+          startRowIndex = idx;
+        }
+        endRowIndex = idx + 1; // Exclusive
+      }
+    }
+
+    if (startRowIndex !== -1 && (endRowIndex - startRowIndex) > 1) {
+      const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+      const sheet = spreadsheet.data.sheets?.find(s => s.properties?.title === sheetTitle);
+      const sheetId = sheet?.properties?.sheetId;
+
+      if (sheetId !== undefined) {
+        // [0, 1, 2, 3] are A to D, [11..20] are L to U (columns containing total, status, remarks etc.)
+        const columnsToMerge = [0, 1, 2, 3, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+        const requests = columnsToMerge.map(colIndex => ({
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex,
+              endRowIndex,
+              startColumnIndex: colIndex,
+              endColumnIndex: colIndex + 1
+            },
+            mergeType: "MERGE_ALL"
+          }
+        }));
+
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          requestBody: { requests }
+        });
+        console.log(`Successfully merged columns for submission ${submissionId} from row ${startRowIndex + 1} to ${endRowIndex}`);
+      }
+    }
+  } catch (error: any) {
+    console.error(`Error merging columns for ${submissionId}:`, error.message);
+  }
+};
+
 // Helper to get the correct range/sheet name
 const getSheetRange = async (sheets: any, spreadsheetId: string, baseRange: string) => {
   try {
@@ -949,44 +1001,7 @@ app.post("/api/claim", async (req, res) => {
 
       // Merge Cells Logic for multi-item submissions
       if (items.length > 1) {
-        try {
-          const updatedRange = appendResponse.data.updates?.updatedRange;
-          if (updatedRange) {
-            const rangePart = updatedRange.split('!').pop();
-            const rowsMatch = rangePart?.match(/[A-Z]+(\d+):[A-Z]+(\d+)/) || updatedRange.match(/(\d+):[A-Z]+(\d+)/);
-            if (rowsMatch) {
-              const startRowIndex = parseInt(rowsMatch[1]) - 1; // 0-indexed
-              const endRowIndex = parseInt(rowsMatch[2]); // Exclusive
-              
-              const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
-              const sheet = spreadsheet.data.sheets?.find(s => s.properties?.title === sheetTitle);
-              const sheetId = sheet?.properties?.sheetId;
-
-              if (sheetId !== undefined) {
-                const columnsToMerge = [0, 1, 2, 3, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
-                const requests = columnsToMerge.map(colIndex => ({
-                  mergeCells: {
-                    range: {
-                      sheetId,
-                      startRowIndex,
-                      endRowIndex,
-                      startColumnIndex: colIndex,
-                      endColumnIndex: colIndex + 1
-                    },
-                    mergeType: "MERGE_ALL"
-                  }
-                }));
-
-                await sheets.spreadsheets.batchUpdate({
-                  spreadsheetId: SHEET_ID,
-                  requestBody: { requests }
-                });
-              }
-            }
-          }
-        } catch (mergeError) {
-          console.error("Merging Error (non-blocking):", mergeError);
-        }
+        await mergeColumnsForSubmission(sheets, SHEET_ID, sheetTitle, submissionId);
       }
     } catch (sheetError: any) {
       console.warn("Google Sheets save skipped/failed (using fallback and database stores):", sheetError.message);
@@ -1770,6 +1785,8 @@ app.post("/api/claims/action", async (req, res) => {
     try {
       const sheets = await getSheetsClient();
       const targetSheet = branchName || "Sheet1";
+      await mergeColumnsForSubmission(sheets, SHEET_ID, targetSheet, id);
+
       if (action === "REMARK") {
         const range = `${targetSheet}!M${rowIndex}:N${rowIndex}`;
         await sheets.spreadsheets.values.update({
@@ -2309,6 +2326,8 @@ app.post("/api/admin/action", async (req, res) => {
     // --- 3. GOOGLE SHEETS ACCESS (Safe Try-Catch) ---
     try {
       const sheets = await getSheetsClient();
+      await mergeColumnsForSubmission(sheets, SHEET_ID, targetSheet, claimId);
+
       if (action === "REMARK") {
         // Column M (Admin Remark), N (Mail Sent)
         const range = `${targetSheet}!M${rowIndex}:N${rowIndex}`;
