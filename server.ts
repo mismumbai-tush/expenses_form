@@ -1009,26 +1009,23 @@ app.post("/api/claim", async (req, res) => {
 
     // Notify Admins & Branch Head (Safe SMTP routing)
     try {
-      const adminEmailsRaw = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
-      const adminsList = adminEmailsRaw.split(",").map(e => e.trim()).filter(Boolean);
-      if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
-        adminsList.push("arvind.sethia@ginzalimited.com");
-      }
-      if (!adminsList.includes("rohit.sethia@ginzalimited.com")) {
-        adminsList.push("rohit.sethia@ginzalimited.com");
-      }
-      if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
-        adminsList.push("mis.mumbai@ginzalimited.com");
-      }
-      const adminEmails = adminsList.join(",");
-      const recipients = branchHeadEmail ? `${adminEmails},${branchHeadEmail}` : adminEmails;
-      
       const emailSubject = `New Claim Submitted - ${salespersonName} (${branchName})`;
-      const emailBody = `Dear Admin,\n\nA new expense claim has been successfully submitted by ${salespersonName}.\n\n--- Claimant Information ---\nName: ${salespersonName}\nEmail: ${salespersonEmail}\nBranch: ${branchName}\nSubmission ID: ${submissionId}\nTotal Amount: ₹${grandTotal}\nTotal Items: ${items.length}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nApplication Portal:\nhttps://expenses-form-one.vercel.app/\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
+      const emailBody = `Dear Team,\n\nA new expense claim has been successfully submitted by ${salespersonName}.\n\n--- Claimant Information ---\nName: ${salespersonName}\nEmail: ${salespersonEmail}\nBranch: ${branchName}\nSubmission ID: ${submissionId}\nTotal Amount: ₹${grandTotal}\nTotal Items: ${items.length}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nApplication Portal:\nhttps://expenses-form-one.vercel.app/\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
+
+      // To: rohit, arvind
+      const toRecipients = "rohit.sethia@ginzalimited.com,arvind.sethia@ginzalimited.com";
+
+      // CC: branch head, ea, mis
+      const ccEmailsArray = [
+        branchHeadEmail,
+        "ea.mumbai@ginzalimited.com",
+        "mis.mumbai@ginzalimited.com"
+      ].filter(e => e && e.trim() !== "");
+      const ccRecipients = Array.from(new Set(ccEmailsArray)).join(",");
 
       await sendMail(
-        recipients,
-        "ea.mumbai@ginzalimited.com,mis.mumbai@ginzalimited.com",
+        toRecipients,
+        ccRecipients,
         emailSubject,
         emailBody,
         salespersonName,
@@ -1574,26 +1571,23 @@ app.post("/api/claims", async (req, res) => {
 
     // Email Dispatch
     try {
-      const adminEmailsRaw = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
-      const adminsList = adminEmailsRaw.split(",").map(e => e.trim()).filter(Boolean);
-      if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
-        adminsList.push("arvind.sethia@ginzalimited.com");
-      }
-      if (!adminsList.includes("rohit.sethia@ginzalimited.com")) {
-        adminsList.push("rohit.sethia@ginzalimited.com");
-      }
-      if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
-        adminsList.push("mis.mumbai@ginzalimited.com");
-      }
-      const adminEmails = adminsList.join(",");
-      const recipients = branchHeadEmail ? `${adminEmails},${branchHeadEmail}` : adminEmails;
-      
       const emailSubject = `New Claim Submitted - ${claimantName} (${branch})`;
-      const emailBody = `Dear Admin,\n\nA new expense claim of ₹${amount} has been successfully submitted by ${claimantName}.\n\n--- Claimant Information ---\nName: ${claimantName}\nEmail: ${claimantEmail}\nBranch: ${branch}\nSubmission ID: ${submissionId}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nApplication Portal:\nhttps://expenses-form-one.vercel.app/\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
+      const emailBody = `Dear Team,\n\nA new expense claim of ₹${amount} has been successfully submitted by ${claimantName}.\n\n--- Claimant Information ---\nName: ${claimantName}\nEmail: ${claimantEmail}\nBranch: ${branch}\nSubmission ID: ${submissionId}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nApplication Portal:\nhttps://expenses-form-one.vercel.app/\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
+
+      // To: rohit, arvind
+      const toRecipients = "rohit.sethia@ginzalimited.com,arvind.sethia@ginzalimited.com";
+
+      // CC: branch head, ea, mis
+      const ccEmailsArray = [
+        branchHeadEmail,
+        "ea.mumbai@ginzalimited.com",
+        "mis.mumbai@ginzalimited.com"
+      ].filter(e => e && e.trim() !== "");
+      const ccRecipients = Array.from(new Set(ccEmailsArray)).join(",");
 
       await sendMail(
-        recipients,
-        "ea.mumbai@ginzalimited.com,mis.mumbai@ginzalimited.com",
+        toRecipients,
+        ccRecipients,
         emailSubject,
         emailBody,
         claimantName,
@@ -1906,7 +1900,7 @@ app.post("/api/claims/action", async (req, res) => {
       const bHeadEmail = claim ? claim.branchheademail : "";
       
       const adminEmailsStr = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
-      const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(Boolean);
+      const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(e => e && e.toLowerCase() !== "ashok.sethia@ginzalimited.com");
       if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
         adminsList.push("arvind.sethia@ginzalimited.com");
       }
@@ -2211,7 +2205,7 @@ app.post("/api/claims/action", async (req, res) => {
 </div>`;
         await sendMail(
           employeeEmail,
-          `${adminEmails},${bHeadEmail}`,
+          `${adminEmails},${bHeadEmail},${accountsMail}`,
           `PAYMENT RELEASED: ${id}`,
           htmlBody,
           adminName,
@@ -2391,7 +2385,7 @@ app.post("/api/admin/action", async (req, res) => {
       const bHeadEmail = claim ? claim.branchheademail : (data?.branchheademail || "");
       
       const adminEmailsStr = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
-      const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(Boolean);
+      const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(e => e && e.toLowerCase() !== "ashok.sethia@ginzalimited.com");
       if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
         adminsList.push("arvind.sethia@ginzalimited.com");
       }
