@@ -489,8 +489,14 @@ export default function App() {
       map[id].totalAmount += Number(c.amount) || 0;
     });
     
-    // Sort: Claims with mailSent === "No" (or lowercase "no") at the very top, then by submitDate descending
+    // Sort: Closed (Released or Rejected) claims are placed at the bottom, active with mailSent === "No" at the top, then by submitDate descending
     return Object.values(map).sort((a: any, b: any) => {
+      const aClosed = a.status === "Released" || a.status === "Rejected";
+      const bClosed = b.status === "Released" || b.status === "Rejected";
+      
+      if (aClosed && !bClosed) return 1;
+      if (!aClosed && bClosed) return -1;
+      
       const aIsNo = String(a.mailSent).toLowerCase() === "no";
       const bIsNo = String(b.mailSent).toLowerCase() === "no";
       
