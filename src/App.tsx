@@ -428,13 +428,26 @@ export default function App() {
     claims.forEach(c => {
       const id = c.id || "Unknown";
       if (!map[id]) {
+        let derivedStatus = normalizeStatus(c.status);
+        const rRelease = String(c.paymentRelease || (c as any).paymentrelease || "").trim().toLowerCase();
+        const rProcess = String(c.paymentProcess || (c as any).paymentprocess || "").trim().toLowerCase();
+        const rApproved = String(c.approved || "").trim().toLowerCase();
+
+        if (rRelease === "yes" || rRelease === "released") {
+          derivedStatus = "Released";
+        } else if (rProcess === "yes" || rProcess === "processed" || rProcess === "payment process on going" || rProcess === "payment process ongoing" || rProcess === "payment_process_on_going" || rProcess === "payment process under going") {
+          derivedStatus = "Processed";
+        } else if (rApproved === "yes" || rApproved === "approved" || rApproved === "approved_process") {
+          derivedStatus = "Approved";
+        }
+
         map[id] = {
           id,
           submitDate: c.submitDate,
           claimantName: c.claimantName,
           claimantEmail: c.claimantEmail,
           branch: c.branch,
-          status: normalizeStatus(c.status),
+          status: derivedStatus,
           remarks: c.remarks,
           rowIndex: c.rowIndex,
           sheetName: c.sheetName,
@@ -1295,8 +1308,8 @@ export default function App() {
                                           >
                                             {item.status === 'Pending' && (
                                               <span className="flex items-center gap-1 justify-center">
-                                                <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
-                                                Resolve
+                                                {isMailNo && <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />}
+                                                {isMailNo ? 'Resolve' : 'Approve'}
                                               </span>
                                             )}
                                             {item.status === 'Approved' && 'Process'}
@@ -1304,8 +1317,8 @@ export default function App() {
                                             {(item.status === 'Released' || item.status === 'Rejected') && 'View'}
                                             {item.status !== 'Pending' && item.status !== 'Approved' && item.status !== 'Processed' && item.status !== 'Payment Process On Going' && item.status !== 'Released' && item.status !== 'Rejected' && (
                                               <span className="flex items-center gap-1 justify-center">
-                                                <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
-                                                Resolve
+                                                {isMailNo && <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />}
+                                                {isMailNo ? 'Resolve' : 'Approve'}
                                               </span>
                                             )}
                                           </button>

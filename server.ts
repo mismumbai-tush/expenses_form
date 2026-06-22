@@ -1915,8 +1915,26 @@ app.post("/api/claims/action", async (req, res) => {
 
       // Resolve claim detail variables
       const employeeName = claim ? (claim.salespersonname || claim.name || "Employee") : "Employee";
-      const employeeEmail = targetClaimant || (claim ? claim.employeeemail : "") || "employee@ginzalimited.com";
       const claimBranch = branchName || (claim ? claim.branchname || claim.branch : "") || "Default";
+
+      let employeeEmail = targetClaimant || (claim ? claim.employeeemail : "") || "employee@ginzalimited.com";
+      const lowerBranchForEmail = claimBranch.toLowerCase().trim();
+      let branchMappedEmail = "";
+      if (lowerBranchForEmail.includes("surat")) {
+        branchMappedEmail = "piyush.baid@ginzalimited.com";
+      } else if (lowerBranchForEmail.includes("jaipur")) {
+        branchMappedEmail = "dugeshbhati593@gmail.com";
+      } else if (lowerBranchForEmail.includes("ludhiana")) {
+        branchMappedEmail = "mahesh.chandeliya@ginzalimited.com";
+      } else if (lowerBranchForEmail.includes("bangalore")) {
+        branchMappedEmail = "murali.krishna@ginzalimited.com";
+      }
+
+      if (!employeeEmail || employeeEmail.toLowerCase().trim() === "employee@ginzalimited.com") {
+        if (branchMappedEmail) {
+          employeeEmail = branchMappedEmail;
+        }
+      }
       const category = claim ? (claim.expensecategory || claim.category || "General") : "General";
       const claimDate = claim ? (claim.itemdate || claim.date || "N/A") : "N/A";
       const expenseTitle = claim ? (claim.itemremark || claim.remark || title || "Expense Claim") : (title || "Expense Claim");
@@ -2380,8 +2398,27 @@ app.post("/api/admin/action", async (req, res) => {
     try {
       const claim = fallbackClaims.find(c => c.submissionid === claimId);
       const sName = claim ? claim.salespersonname : (data?.salespersonname || "Employee");
-      const sEmail = claim ? (claim.employeeemail || claim.salesperson_email) : (data?.employeeemail || "");
       const bName = claim ? claim.branchname : (data?.branchname || "Sheet1");
+
+      let sEmail = claim ? (claim.employeeemail || claim.salesperson_email) : (data?.employeeemail || "");
+      const bNameLower = (bName || "").toLowerCase().trim();
+      let bMappedEmail = "";
+      if (bNameLower.includes("surat")) {
+        bMappedEmail = "piyush.baid@ginzalimited.com";
+      } else if (bNameLower.includes("jaipur")) {
+        bMappedEmail = "dugeshbhati593@gmail.com";
+      } else if (bNameLower.includes("ludhiana")) {
+        bMappedEmail = "mahesh.chandeliya@ginzalimited.com";
+      } else if (bNameLower.includes("bangalore")) {
+        bMappedEmail = "murali.krishna@ginzalimited.com";
+      }
+
+      if (!sEmail || sEmail.toLowerCase().trim() === "employee@ginzalimited.com") {
+        if (bMappedEmail) {
+          sEmail = bMappedEmail;
+        }
+      }
+
       const gTotal = claim ? claim.grandtotal : (data?.grandtotal || "0");
       const bHeadEmail = claim ? claim.branchheademail : (data?.branchheademail || "");
       
