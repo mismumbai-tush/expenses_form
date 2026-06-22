@@ -677,9 +677,10 @@ const uploadToDrive = async (fileName: string, base64Data: string, mimeType: str
     });
 
     return file.data.webViewLink;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Drive Upload Error:", error);
-    return "Upload Failed";
+    const msg = error?.message || String(error);
+    return `Upload Failed (${msg})`;
   }
 };
 
