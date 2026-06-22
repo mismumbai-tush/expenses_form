@@ -425,6 +425,18 @@ export default function App() {
   // Group claims by ID to show as single row per submission ID
   const groupedClaims = React.useMemo(() => {
     const map: { [key: string]: any } = {};
+    const closedIds = [
+      "SUB-D5FBE8B4",
+      "SUB-B611450F",
+      "SUB-C9A1729C",
+      "EXP-1780121128893",
+      "SUB-91CFC632",
+      "SUB-1F069A89",
+      "SUB-895315C4",
+      "SUB-917DABF2",
+      "SUB-3543435C2"
+    ].map(id => id.trim().toLowerCase());
+
     claims.forEach(c => {
       const id = c.id || "Unknown";
       if (!map[id]) {
@@ -433,7 +445,9 @@ export default function App() {
         const rProcess = String(c.paymentProcess || (c as any).paymentprocess || "").trim().toLowerCase();
         const rApproved = String(c.approved || "").trim().toLowerCase();
 
-        if (rRelease === "yes" || rRelease === "released") {
+        if (closedIds.includes(id.trim().toLowerCase())) {
+          derivedStatus = "Released";
+        } else if (rRelease === "yes" || rRelease === "released") {
           derivedStatus = "Released";
         } else if (rProcess === "yes" || rProcess === "processed" || rProcess === "payment process on going" || rProcess === "payment process ongoing" || rProcess === "payment_process_on_going" || rProcess === "payment process under going") {
           derivedStatus = "Processed";
@@ -1286,7 +1300,7 @@ export default function App() {
                                             ? 'bg-rose-50 text-rose-700 border-rose-250' 
                                             : 'bg-amber-50 text-amber-700 border-amber-250'
                                         }`}>
-                                          {item.status || 'Pending'}
+                                          {item.status === 'Released' ? 'Closed' : (item.status || 'Pending')}
                                         </span>
 
                                         <div className="flex items-center gap-1.5">
@@ -1314,7 +1328,8 @@ export default function App() {
                                             )}
                                             {item.status === 'Approved' && 'Process'}
                                             {(item.status === 'Processed' || item.status === 'Payment Process On Going') && 'Release'}
-                                            {(item.status === 'Released' || item.status === 'Rejected') && 'View'}
+                                            {item.status === 'Released' && 'Closed'}
+                                            {item.status === 'Rejected' && 'View'}
                                             {item.status !== 'Pending' && item.status !== 'Approved' && item.status !== 'Processed' && item.status !== 'Payment Process On Going' && item.status !== 'Released' && item.status !== 'Rejected' && (
                                               <span className="flex items-center gap-1 justify-center">
                                                 {isMailNo && <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />}
