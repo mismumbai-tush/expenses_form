@@ -34,6 +34,7 @@ export interface Claim {
   processedBy?: string;
   paymentRelease?: string;
   releasedBy?: string;
+  mailSent?: string;
   totalAmount?: number;
   holdItemIndexes?: number[];
   items?: Array<{

@@ -1187,6 +1187,7 @@ app.get("/api/claims", async (req, res) => {
         processedBy: item.processedby || "",
         paymentRelease: item.paymentrelease || "No",
         releasedBy: item.releasedby || "",
+        mailSent: item.mailsent || item.mailSent || "No",
         holdItemIndexes
       };
     });
