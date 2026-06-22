@@ -412,14 +412,14 @@ export default function App() {
   const normalizeStatus = (statusStr: string | undefined): string => {
     if (!statusStr) return "Pending";
     const lower = statusStr.trim().toLowerCase();
-    if (lower === "pending") return "Pending";
+    if (lower === "pending" || lower === "no" || lower === "") return "Pending";
     if (lower === "approved" || lower === "approved_process" || lower === "approved & processed") return "Approved";
     if (lower === "processed" || lower === "payment process on going" || lower === "payment process ongoing" || lower === "payment_process_on_going" || lower === "payment process under going") {
       return "Processed";
     }
     if (lower === "released") return "Released";
     if (lower === "rejected") return "Rejected";
-    return statusStr; // fallback
+    return "Pending"; // Map any unrecognized status to Pending to enable Resolve button
   };
 
   // Group claims by ID to show as single row per submission ID
@@ -1151,7 +1151,7 @@ export default function App() {
                               <th className="py-3 px-3 w-8"></th>
                               <th className="py-3 px-4">Claim ID</th>
                               <th className="py-3 px-4">Claimant Info</th>
-                              <th className="py-3 px-4 w-32 max-w-[130px]">Expenses Summary</th>
+                              <th className="py-3 px-4 w-24 max-w-[95px]">Expenses Summary</th>
                               <th className="py-3 px-4 text-right">Grand Total</th>
                               <th className="py-3 px-4">Submitted At</th>
                               <th className="py-3 px-4 text-center">Mail Sent (Submitted)</th>
@@ -1222,7 +1222,7 @@ export default function App() {
                                     </td>
 
                                     {/* 3. Expense Summary */}
-                                    <td className="py-4 px-4 w-32 max-w-[130px] truncate">
+                                    <td className="py-4 px-4 w-24 max-w-[95px] truncate">
                                       <div className="space-y-1">
                                         <p className="font-extrabold text-slate-750 text-[11px] leading-tight flex items-center gap-1">
                                           {itemsCount} Item{itemsCount > 1 ? 's' : ''}
@@ -1290,7 +1290,7 @@ export default function App() {
                                                 ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-0'
                                                 : (item.status === 'Processed' || item.status === 'Payment Process On Going')
                                                 ? 'bg-blue-600 hover:bg-blue-700 text-white border-0'
-                                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-800 border border-slate-350'
+                                                : (item.status === 'Released' || item.status === 'Rejected') ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-800 border border-slate-350' : 'bg-indigo-600 hover:bg-indigo-700 text-white border-0'
                                             }`}
                                           >
                                             {item.status === 'Pending' && (
@@ -1302,6 +1302,12 @@ export default function App() {
                                             {item.status === 'Approved' && 'Process'}
                                             {(item.status === 'Processed' || item.status === 'Payment Process On Going') && 'Release'}
                                             {(item.status === 'Released' || item.status === 'Rejected') && 'View'}
+                                            {item.status !== 'Pending' && item.status !== 'Approved' && item.status !== 'Processed' && item.status !== 'Payment Process On Going' && item.status !== 'Released' && item.status !== 'Rejected' && (
+                                              <span className="flex items-center gap-1 justify-center">
+                                                <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
+                                                Resolve
+                                              </span>
+                                            )}
                                           </button>
 
                                           {deleteConfirmId === item.id ? (
