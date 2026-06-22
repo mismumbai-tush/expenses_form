@@ -408,6 +408,20 @@ export default function App() {
     }
   };
 
+  // Normalizes status strings from various database/Google Sheets formats for consistent UI matching
+  const normalizeStatus = (statusStr: string | undefined): string => {
+    if (!statusStr) return "Pending";
+    const lower = statusStr.trim().toLowerCase();
+    if (lower === "pending") return "Pending";
+    if (lower === "approved" || lower === "approved_process" || lower === "approved & processed") return "Approved";
+    if (lower === "processed" || lower === "payment process on going" || lower === "payment process ongoing" || lower === "payment_process_on_going" || lower === "payment process under going") {
+      return "Processed";
+    }
+    if (lower === "released") return "Released";
+    if (lower === "rejected") return "Rejected";
+    return statusStr; // fallback
+  };
+
   // Group claims by ID to show as single row per submission ID
   const groupedClaims = React.useMemo(() => {
     const map: { [key: string]: any } = {};
@@ -420,7 +434,7 @@ export default function App() {
           claimantName: c.claimantName,
           claimantEmail: c.claimantEmail,
           branch: c.branch,
-          status: c.status,
+          status: normalizeStatus(c.status),
           remarks: c.remarks,
           rowIndex: c.rowIndex,
           sheetName: c.sheetName,
@@ -1137,7 +1151,7 @@ export default function App() {
                               <th className="py-3 px-3 w-8"></th>
                               <th className="py-3 px-4">Claim ID</th>
                               <th className="py-3 px-4">Claimant Info</th>
-                              <th className="py-3 px-4">Expenses Summary</th>
+                              <th className="py-3 px-4 w-32 max-w-[130px]">Expenses Summary</th>
                               <th className="py-3 px-4 text-right">Grand Total</th>
                               <th className="py-3 px-4">Submitted At</th>
                               <th className="py-3 px-4 text-center">Mail Sent (Submitted)</th>
@@ -1208,12 +1222,12 @@ export default function App() {
                                     </td>
 
                                     {/* 3. Expense Summary */}
-                                    <td className="py-4 px-4">
-                                      <div className="space-y-1 max-w-[200px] sm:max-w-xs">
-                                        <p className="font-extrabold text-slate-750 text-[11px] leading-tight">
+                                    <td className="py-4 px-4 w-32 max-w-[130px] truncate">
+                                      <div className="space-y-1">
+                                        <p className="font-extrabold text-slate-750 text-[11px] leading-tight flex items-center gap-1">
                                           {itemsCount} Item{itemsCount > 1 ? 's' : ''}
                                         </p>
-                                        <p className="text-[10px] text-slate-500 truncate font-semibold">
+                                        <p className="text-[10px] text-slate-500 truncate font-semibold" title={categoriesSum}>
                                           {categoriesSum}
                                         </p>
                                       </div>
