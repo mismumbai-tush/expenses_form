@@ -493,7 +493,14 @@ export default function App() {
       "SUB-895315C4",
       "SUB-917DABF2",
       "SUB-3543435C2",
-      "SUB-6CC37E91"
+      "SUB-6CC37E91",
+      "EXP-1781247823750",
+      "EXP-1781273798991",
+      "EXP-1781371841828",
+      "EXP-1781502968964",
+      "SUB-7010E59E",
+      "EXP-1782124763185",
+      "EXP-1782124822597"
     ].map(id => id.trim().toLowerCase());
 
     claims.forEach(c => {
