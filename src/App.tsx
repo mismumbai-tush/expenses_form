@@ -136,6 +136,12 @@ export default function App() {
   // Custom confirmation for deletion to avoid iframe sandbox blocked prompts
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteSidebarConfirm, setDeleteSidebarConfirm] = useState(false);
+  const [closeSidebarConfirm, setCloseSidebarConfirm] = useState(false);
+
+  useEffect(() => {
+    setDeleteSidebarConfirm(false);
+    setCloseSidebarConfirm(false);
+  }, [selectedClaim]);
 
   // Admin filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -405,6 +411,58 @@ export default function App() {
       }
     } catch (err: any) {
       setActionStatus({ type: 'error', message: `Server deletion failed: ${err.message}` });
+    }
+  };
+
+  // Force-close claim to mark status as Closed (Released) in sheets and database
+  const handleForceCloseClaim = async () => {
+    if (!selectedClaim) return;
+    
+    if (!closeSidebarConfirm) {
+      setCloseSidebarConfirm(true);
+      return;
+    }
+
+    setActionStatus({ type: 'updating', message: `Marking claim ${selectedClaim.id} as Closed...` });
+    setCloseSidebarConfirm(false);
+
+    try {
+      const originalTotal = selectedClaim.totalAmount || selectedClaim.amount || 0;
+      const response = await fetch('/api/claims/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedClaim.id,
+          status: 'Released',
+          remarks: 'Manually closed by Admin override',
+          claimantEmail: selectedClaim.claimantEmail,
+          title: selectedClaim.title,
+          amount: originalTotal,
+          originalAmount: originalTotal,
+          holdItemIndexes: [],
+          rowIndex: (selectedClaim as any).rowIndex,
+          branchName: (selectedClaim as any).sheetName,
+          adminEmail: adminLoggedInEmail
+        })
+      });
+
+      const resData = await response.json();
+      if (resData.success) {
+        setActionStatus({ type: 'success', message: 'Successfully closed/released the claim.' });
+        setTimeout(() => {
+          setSelectedClaim(null);
+          setRemarksState('');
+          setHeldItemIndexes([]);
+          setActionStatus({ type: 'idle', message: '' });
+        }, 1500);
+
+        // Reload data
+        fetchClaims();
+      } else {
+        setActionStatus({ type: 'error', message: resData.error || 'Failed to close claim.' });
+      }
+    } catch (err: any) {
+      setActionStatus({ type: 'error', message: `Server action failed: ${err.message}` });
     }
   };
 
@@ -1789,7 +1847,42 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="pt-4 border-t border-slate-200">
+                <div className="pt-4 border-t border-slate-200 space-y-3">
+                  {selectedClaim.status !== 'Released' && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex flex-col sm:flex-row justify-between items-center gap-2">
+                      <div>
+                        <p className="text-xs font-bold text-amber-800">Manual Close Override</p>
+                        <p className="text-[10px] text-amber-600 leading-tight">Directly force-close this claim. This will mark its status as Closed (Released) in Google Sheets and database logs.</p>
+                      </div>
+                      {closeSidebarConfirm ? (
+                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                          <button
+                            onClick={() => setCloseSidebarConfirm(false)}
+                            className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded text-[11px] transition-all cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleForceCloseClaim}
+                            className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-[11px] hover:shadow transition-all cursor-pointer"
+                          >
+                            Confirm Close
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          id="force_close_claim_btn"
+                          onClick={handleForceCloseClaim}
+                          disabled={actionStatus.type === 'updating'}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-[11px] shadow hover:shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <CheckCircle className="h-3.5 w-3.5" />
+                          Close Claim
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 flex flex-col sm:flex-row justify-between items-center gap-2">
                     <div>
                       <p className="text-xs font-bold text-rose-800">Dangerous Administrative Action</p>
