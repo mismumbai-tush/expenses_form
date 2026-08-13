@@ -506,7 +506,31 @@ const getDriveClient = async () => {
 };
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1chWoPA4oh7Ss2Xy2jZmUCTDRnmcbDU8L4ojsy46mJh8";
-const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
+
+// Helper to extract clean alphanumeric Google Drive Folder ID from plain string or full Drive URL
+const extractDriveFolderId = (rawInput?: string): string => {
+  const input = rawInput || process.env.GOOGLE_DRIVE_FOLDER_ID || "1yizrv4TsQADhOxPLMVQSvOIMrSYNqoGs";
+  if (!input) return "1yizrv4TsQADhOxPLMVQSvOIMrSYNqoGs";
+
+  const trimmed = input.trim();
+  const folderMatch = trimmed.match(/folders\/([a-zA-Z0-9_-]+)/) || trimmed.match(/id=([a-zA-Z0-9_-]+)/);
+  if (folderMatch && folderMatch[1]) {
+    return folderMatch[1];
+  }
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    const cleanUrl = trimmed.split("?")[0].split("#")[0];
+    const segments = cleanUrl.split("/").filter(Boolean);
+    const last = segments[segments.length - 1];
+    if (last && last.length > 5 && !last.includes(".")) {
+      return last;
+    }
+  }
+
+  return trimmed;
+};
+
+const FOLDER_ID = extractDriveFolderId(process.env.GOOGLE_DRIVE_FOLDER_ID);
 
 const HEADERS = [
   "Timestamp", "Submission ID", "Branch Name", "Salesperson Name", "Expense Category", 
@@ -650,33 +674,66 @@ const RANGE = "Sheet1!A:Z";
 const uploadToDrive = async (fileName: string, base64Data: string, mimeType: string) => {
   try {
     const drive = await getDriveClient();
-    const buffer = Buffer.from(base64Data.split(',')[1] || base64Data, 'base64');
     
-    const fileMetadata = {
+    // Clean base64 string
+    const base64Clean = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+    const buffer = Buffer.from(base64Clean, 'base64');
+
+    // Auto-detect MIME type from base64 string if available
+    let detectedMime = mimeType || 'application/octet-stream';
+    if (base64Data.startsWith('data:')) {
+      const match = base64Data.match(/^data:([^;]+);/);
+      if (match && match[1]) {
+        detectedMime = match[1];
+      }
+    }
+
+    const folderId = extractDriveFolderId();
+    const fileMetadata: any = {
       name: fileName,
-      parents: FOLDER_ID ? [FOLDER_ID] : undefined,
     };
+    if (folderId) {
+      fileMetadata.parents = [folderId];
+    }
+
     const media = {
-      mimeType: mimeType,
+      mimeType: detectedMime,
       body: stream.Readable.from(buffer),
     };
 
-    const file = await drive.files.create({
-      requestBody: fileMetadata,
-      media: media,
-      fields: 'id, webViewLink',
-    });
+    let file: any;
+    try {
+      file = await drive.files.create({
+        requestBody: fileMetadata,
+        media: media,
+        fields: 'id, webViewLink, webContentLink',
+      });
+    } catch (parentError: any) {
+      console.warn(`Drive upload into folder '${folderId}' failed (${parentError?.message}). Retrying upload directly to Google Drive root...`);
+      delete fileMetadata.parents;
+      file = await drive.files.create({
+        requestBody: fileMetadata,
+        media: media,
+        fields: 'id, webViewLink, webContentLink',
+      });
+    }
 
-    // Make file readable by anyone with the link (optional but helpful for admins)
-    await drive.permissions.create({
-      fileId: file.data.id!,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone',
-      },
-    });
+    if (file?.data?.id) {
+      try {
+        await drive.permissions.create({
+          fileId: file.data.id,
+          requestBody: {
+            role: 'reader',
+            type: 'anyone',
+          },
+        });
+      } catch (permError: any) {
+        console.warn("Could not set public permission on uploaded Drive file:", permError?.message);
+      }
+    }
 
-    return file.data.webViewLink;
+    const fileLink = file?.data?.webViewLink || (file?.data?.id ? `https://drive.google.com/file/d/${file.data.id}/view` : '');
+    return fileLink || "Upload Failed";
   } catch (error: any) {
     console.error("Drive Upload Error:", error);
     const msg = error?.message || String(error);
