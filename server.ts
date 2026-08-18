@@ -470,6 +470,23 @@ const fallbackAdmins = new Map<string, any>(Object.entries(initialAdmins));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Handle JSON / payload parsing errors gracefully so they return valid JSON instead of HTML 413
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+    return res.status(413).json({
+      success: false,
+      error: 'Upload payload is too large. Please upload smaller receipt images or compressed files.'
+    });
+  }
+  if (err && err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid JSON request payload.'
+    });
+  }
+  next(err);
+});
+
 // --- Google Client Helper ---
 const getGoogleAuth = async () => {
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
@@ -490,6 +507,7 @@ const getGoogleAuth = async () => {
     },
     scopes: [
       "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/drive",
       "https://www.googleapis.com/auth/drive.file"
     ],
   });
@@ -509,8 +527,8 @@ const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1chWoPA4oh7Ss2Xy2jZmUCTDRnmcbDU
 
 // Helper to extract clean alphanumeric Google Drive Folder ID from plain string or full Drive URL
 const extractDriveFolderId = (rawInput?: string): string => {
-  const input = rawInput || process.env.GOOGLE_DRIVE_FOLDER_ID || "1yizrv4TsQADhOxPLMVQSvOIMrSYNqoGs";
-  if (!input) return "1yizrv4TsQADhOxPLMVQSvOIMrSYNqoGs";
+  const input = rawInput || process.env.GOOGLE_DRIVE_FOLDER_ID || "1lEHtNtm6kJQYvAH5XGoCb0tXJCXbxJbW";
+  if (!input) return "1lEHtNtm6kJQYvAH5XGoCb0tXJCXbxJbW";
 
   const trimmed = input.trim();
   const folderMatch = trimmed.match(/folders\/([a-zA-Z0-9_-]+)/) || trimmed.match(/id=([a-zA-Z0-9_-]+)/);
@@ -696,25 +714,29 @@ const uploadToDrive = async (fileName: string, base64Data: string, mimeType: str
       fileMetadata.parents = [folderId];
     }
 
-    const media = {
+    // Factory to create a fresh unconsumed readable stream for every API attempt
+    const getFreshMedia = () => ({
       mimeType: detectedMime,
       body: stream.Readable.from(buffer),
-    };
+    });
 
     let file: any;
     try {
       file = await drive.files.create({
         requestBody: fileMetadata,
-        media: media,
+        media: getFreshMedia(),
         fields: 'id, webViewLink, webContentLink',
+        supportsAllDrives: true,
       });
     } catch (parentError: any) {
-      console.warn(`Drive upload into folder '${folderId}' failed (${parentError?.message}). Retrying upload directly to Google Drive root...`);
+      console.warn(`Drive upload into folder '${folderId}' failed (${parentError?.message}). Retrying upload with a fresh stream directly to Google Drive root...`);
       delete fileMetadata.parents;
+      // IMPORTANT: Pass a fresh unconsumed stream here so we never encounter "stream.push() after EOF"
       file = await drive.files.create({
         requestBody: fileMetadata,
-        media: media,
+        media: getFreshMedia(),
         fields: 'id, webViewLink, webContentLink',
+        supportsAllDrives: true,
       });
     }
 
@@ -726,13 +748,14 @@ const uploadToDrive = async (fileName: string, base64Data: string, mimeType: str
             role: 'reader',
             type: 'anyone',
           },
+          supportsAllDrives: true,
         });
       } catch (permError: any) {
         console.warn("Could not set public permission on uploaded Drive file:", permError?.message);
       }
     }
 
-    const fileLink = file?.data?.webViewLink || (file?.data?.id ? `https://drive.google.com/file/d/${file.data.id}/view` : '');
+    const fileLink = file?.data?.webViewLink || (file?.data?.id ? `https://drive.google.com/file/d/${file.data.id}/view?usp=sharing` : '');
     return fileLink || "Upload Failed";
   } catch (error: any) {
     console.error("Drive Upload Error:", error);

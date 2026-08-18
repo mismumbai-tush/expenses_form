@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BRANCHES, CATEGORIES } from './constants';
 import { Claim, Salesperson, Branch } from './types';
+import { processReceiptFile, safeFetchJson } from './lib/fileUtils';
 import { 
   Building2, 
   User, 
@@ -21,7 +22,8 @@ import {
   Check,
   Trash2,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -37,6 +39,9 @@ export default function App() {
   // claimant info
   const [claimantName, setClaimantName] = useState('');
   const [claimantEmail, setClaimantEmail] = useState('');
+  
+  // File processing state for uploads
+  const [processingFileIds, setProcessingFileIds] = useState<Record<string, boolean>>({});
   
   // claim info - now supporting multiple lines
   const [expenseLines, setExpenseLines] = useState<Array<{
@@ -153,9 +158,8 @@ export default function App() {
   const fetchClaims = async () => {
     setLoadingClaims(true);
     try {
-      const response = await fetch('/api/claims');
-      const data = await response.json();
-      if (data.success) {
+      const data = await safeFetchJson<{ success: boolean; claims: Claim[] }>('/api/claims');
+      if (data && data.success) {
         // Sort claims by date descending
         const sortedClaims = (data.claims || []).sort((a: Claim, b: Claim) => 
           new Date(b.submitDate).getTime() - new Date(a.submitDate).getTime()
@@ -240,7 +244,7 @@ export default function App() {
         };
       });
 
-      const response = await fetch('/api/claim', {
+      const resData = await safeFetchJson<{ success: boolean; submissionId?: string; error?: string }>('/api/claim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -253,8 +257,7 @@ export default function App() {
         })
       });
 
-      const resData = await response.json();
-      if (resData.success) {
+      if (resData && resData.success) {
         setFormStatus({ 
           type: 'success', 
           message: `Successfully registered expense claim! (ID: ${resData.submissionId})` 
@@ -281,7 +284,7 @@ export default function App() {
         // Reload table logs
         fetchClaims();
       } else {
-        throw new Error(resData.error || 'Server failed to process your expense claim');
+        throw new Error(resData?.error || 'Server failed to process your expense claim');
       }
     } catch (err: any) {
       setFormStatus({ type: 'error', message: `Submission failed: ${err.message}` });
@@ -330,7 +333,7 @@ export default function App() {
     setActionStatus({ type: 'updating', message: `Setting claim logs to ${status}...` });
 
     try {
-      const response = await fetch('/api/claims/action', {
+      const resData = await safeFetchJson<{ success: boolean; error?: string }>('/api/claims/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -348,8 +351,7 @@ export default function App() {
         })
       });
 
-      const resData = await response.json();
-      if (resData.success) {
+      if (resData && resData.success) {
         setActionStatus({ type: 'success', message: `Successfully saved ${status} state to Sheets.` });
         setTimeout(() => {
           setSelectedClaim(null);
@@ -361,7 +363,7 @@ export default function App() {
         // Instantly reload database claims so updates represent perfectly!
         fetchClaims();
       } else {
-        setActionStatus({ type: 'error', message: resData.error || 'Failed to sync update to Google Sheets.' });
+        setActionStatus({ type: 'error', message: resData?.error || 'Failed to sync update to Google Sheets.' });
       }
     } catch (err: any) {
       setActionStatus({ type: 'error', message: `Server update failed: ${err.message}` });
@@ -382,7 +384,7 @@ export default function App() {
     setDeleteSidebarConfirm(false);
 
     try {
-      const response = await fetch('/api/admin/claims/delete', {
+      const resData = await safeFetchJson<{ success: boolean; sheetsWarning?: string; error?: string }>('/api/admin/claims/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -391,8 +393,7 @@ export default function App() {
         })
       });
 
-      const resData = await response.json();
-      if (resData.success) {
+      if (resData && resData.success) {
         let msg = 'Successfully deleted the claim.';
         if (resData.sheetsWarning) {
           msg += ` Note: Google Sheets warning - ${resData.sheetsWarning}. Please ensure your service account has Editor access to the spreadsheet.`;
@@ -407,7 +408,7 @@ export default function App() {
         // Instantly reload claims in UI!
         fetchClaims();
       } else {
-        setActionStatus({ type: 'error', message: resData.error || 'Failed to delete claim.' });
+        setActionStatus({ type: 'error', message: resData?.error || 'Failed to delete claim.' });
       }
     } catch (err: any) {
       setActionStatus({ type: 'error', message: `Server deletion failed: ${err.message}` });
@@ -428,7 +429,7 @@ export default function App() {
 
     try {
       const originalTotal = selectedClaim.totalAmount || selectedClaim.amount || 0;
-      const response = await fetch('/api/claims/action', {
+      const resData = await safeFetchJson<{ success: boolean; error?: string }>('/api/claims/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -446,8 +447,7 @@ export default function App() {
         })
       });
 
-      const resData = await response.json();
-      if (resData.success) {
+      if (resData && resData.success) {
         setActionStatus({ type: 'success', message: 'Successfully closed/released the claim.' });
         setTimeout(() => {
           setSelectedClaim(null);
@@ -459,7 +459,7 @@ export default function App() {
         // Reload data
         fetchClaims();
       } else {
-        setActionStatus({ type: 'error', message: resData.error || 'Failed to close claim.' });
+        setActionStatus({ type: 'error', message: resData?.error || 'Failed to close claim.' });
       }
     } catch (err: any) {
       setActionStatus({ type: 'error', message: `Server action failed: ${err.message}` });
@@ -1006,28 +1006,42 @@ export default function App() {
                                 id={`file_input_${line.id}`}
                                 className="hidden"
                                 accept="image/*,application/pdf"
-                                onChange={(e) => {
+                                onChange={async (e) => {
                                   if (e.target.files && e.target.files[0]) {
                                     const selectedFile = e.target.files[0];
-                                    const reader = new FileReader();
-                                    reader.readAsDataURL(selectedFile);
-                                    reader.onload = () => {
-                                      handleUpdateLine(line.id, 'fileName', selectedFile.name);
-                                      handleUpdateLine(line.id, 'fileBase64', reader.result as string);
-                                      handleUpdateLine(line.id, 'fileType', selectedFile.type);
-                                    };
+                                    setProcessingFileIds(prev => ({ ...prev, [line.id]: true }));
+                                    try {
+                                      const processed = await processReceiptFile(selectedFile);
+                                      handleUpdateLine(line.id, 'fileName', processed.fileName);
+                                      handleUpdateLine(line.id, 'fileBase64', processed.base64);
+                                      handleUpdateLine(line.id, 'fileType', processed.fileType);
+                                    } catch (err: any) {
+                                      setFormStatus({ type: 'error', message: err.message || 'Failed to process attachment.' });
+                                    } finally {
+                                      setProcessingFileIds(prev => ({ ...prev, [line.id]: false }));
+                                    }
                                   }
                                 }}
                               />
                               <button
                                 type="button"
+                                disabled={processingFileIds[line.id]}
                                 onClick={() => {
                                   document.getElementById(`file_input_${line.id}`)?.click();
                                 }}
-                                className="w-full px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                                className="w-full px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer disabled:opacity-60"
                               >
-                                <Upload className="h-3 w-3 text-slate-400" />
-                                Browse/Upload Receipt (Img, PDF)
+                                {processingFileIds[line.id] ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 text-blue-500 animate-spin" />
+                                    <span>Compressing & Attaching Receipt...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Upload className="h-3 w-3 text-slate-400" />
+                                    <span>Browse/Upload Receipt (Img, PDF)</span>
+                                  </>
+                                )}
                               </button>
                             </div>
                           )}
@@ -1432,7 +1446,7 @@ export default function App() {
                                                   setDeleteConfirmId(null);
                                                   setActionStatus({ type: 'updating', message: `Permanently deleting claim ${item.id}...` });
                                                   try {
-                                                    const response = await fetch('/api/admin/claims/delete', {
+                                                    const resData = await safeFetchJson<{ success: boolean; sheetsWarning?: string; error?: string }>('/api/admin/claims/delete', {
                                                       method: 'POST',
                                                       headers: { 'Content-Type': 'application/json' },
                                                       body: JSON.stringify({
@@ -1440,8 +1454,7 @@ export default function App() {
                                                         sheetName: (item as any).sheetName || item.branch
                                                       })
                                                     });
-                                                    const resData = await response.json();
-                                                    if (resData.success) {
+                                                    if (resData && resData.success) {
                                                       let msg = 'Successfully deleted the claim.';
                                                       if (resData.sheetsWarning) {
                                                         msg += ` Note: Google Sheets warning - ${resData.sheetsWarning}. Please ensure your service account has Editor access to the spreadsheet.`;
@@ -1450,7 +1463,7 @@ export default function App() {
                                                       setTimeout(() => setActionStatus({ type: 'idle', message: '' }), 3500);
                                                       fetchClaims();
                                                     } else {
-                                                      setActionStatus({ type: 'error', message: resData.error || 'Failed to delete.' });
+                                                      setActionStatus({ type: 'error', message: resData?.error || 'Failed to delete.' });
                                                     }
                                                   } catch (err: any) {
                                                     setActionStatus({ type: 'error', message: err.message });
