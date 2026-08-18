@@ -527,8 +527,8 @@ const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1chWoPA4oh7Ss2Xy2jZmUCTDRnmcbDU
 
 // Helper to extract clean alphanumeric Google Drive Folder ID from plain string or full Drive URL
 const extractDriveFolderId = (rawInput?: string): string => {
-  const input = rawInput || process.env.GOOGLE_DRIVE_FOLDER_ID || "1lEHtNtm6kJQYvAH5XGoCb0tXJCXbxJbW";
-  if (!input) return "1lEHtNtm6kJQYvAH5XGoCb0tXJCXbxJbW";
+  const input = rawInput || process.env.GOOGLE_DRIVE_FOLDER_ID || "1yizrv4TsQADhOxPLMVQSvOIMrSYNqoGs";
+  if (!input) return "1yizrv4TsQADhOxPLMVQSvOIMrSYNqoGs";
 
   const trimmed = input.trim();
   const folderMatch = trimmed.match(/folders\/([a-zA-Z0-9_-]+)/) || trimmed.match(/id=([a-zA-Z0-9_-]+)/);
@@ -690,23 +690,59 @@ const RANGE = "Sheet1!A:Z";
 
 // --- Drive Upload Helper ---
 const uploadToDrive = async (fileName: string, base64Data: string, mimeType: string) => {
+  const folderId = extractDriveFolderId();
+
+  // Auto-detect MIME type from base64 string if available
+  let detectedMime = mimeType || 'application/octet-stream';
+  if (base64Data.startsWith('data:')) {
+    const match = base64Data.match(/^data:([^;]+);/);
+    if (match && match[1]) {
+      detectedMime = match[1];
+    }
+  }
+
+  // Clean base64 string
+  const base64Clean = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+
+  // 1. Google Apps Script Web App Bridge (Bypasses Service Account 0 MB Quota using user's 15GB+ drive quota)
+  const scriptUrl = process.env.GOOGLE_APPS_SCRIPT_URL || process.env.DRIVE_UPLOAD_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbyO5KuQSMIM0VwkRClF5GbB-dqrMiJRRmADwF1UEg5p1Q_Zd4jTafMSvJ8Q_jPjrK46/exec";
+  if (scriptUrl && scriptUrl.startsWith("http")) {
+    try {
+      console.log(`Uploading ${fileName} via Google Apps Script Webhook (${scriptUrl.slice(0, 45)}...)...`);
+      const scriptRes = await fetch(scriptUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          fileName,
+          fileData: base64Clean,
+          mimeType: detectedMime,
+          folderId: folderId
+        }),
+        redirect: "follow"
+      });
+      const text = await scriptRes.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch (_) {}
+
+      if (json?.url) {
+        console.log(`Apps Script Upload Success: ${json.url}`);
+        return json.url;
+      }
+      if (json?.error) {
+        console.warn("Apps Script returned error:", json.error);
+      }
+    } catch (scriptErr: any) {
+      console.warn("Apps Script Upload attempt failed:", scriptErr.message);
+    }
+  }
+
+  // 2. Direct Google Drive API (For Shared Drives or OAuth/Service Account with Workspace)
   try {
     const drive = await getDriveClient();
-    
-    // Clean base64 string
-    const base64Clean = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
     const buffer = Buffer.from(base64Clean, 'base64');
 
-    // Auto-detect MIME type from base64 string if available
-    let detectedMime = mimeType || 'application/octet-stream';
-    if (base64Data.startsWith('data:')) {
-      const match = base64Data.match(/^data:([^;]+);/);
-      if (match && match[1]) {
-        detectedMime = match[1];
-      }
-    }
-
-    const folderId = extractDriveFolderId();
     const fileMetadata: any = {
       name: fileName,
     };
@@ -756,11 +792,80 @@ const uploadToDrive = async (fileName: string, base64Data: string, mimeType: str
     }
 
     const fileLink = file?.data?.webViewLink || (file?.data?.id ? `https://drive.google.com/file/d/${file.data.id}/view?usp=sharing` : '');
-    return fileLink || "Upload Failed";
+    return fileLink || "";
   } catch (error: any) {
     console.error("Drive Upload Error:", error);
     const msg = error?.message || String(error);
     return `Upload Failed (${msg})`;
+  }
+};
+
+// --- In-Memory & Cloud Attachment Storage for Zero-Quota Fallback ---
+const attachmentCache = new Map<string, { buffer: Buffer; mimeType: string; fileName: string }>();
+
+const getBaseUrl = (req: express.Request) => {
+  if (process.env.APP_URL && process.env.APP_URL !== "MY_APP_URL" && !process.env.APP_URL.includes("localhost")) {
+    return process.env.APP_URL.replace(/\/$/, "");
+  }
+  const forwardedHost = req.get("x-forwarded-host");
+  const host = forwardedHost || req.get("host");
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  if (host) {
+    return `${proto}://${host}`;
+  }
+  return "https://expenses-form-one.vercel.app";
+};
+
+const saveAttachmentLocallyAndCloud = async (
+  attachmentId: string,
+  fileName: string,
+  base64Data: string,
+  mimeType: string
+) => {
+  try {
+    const base64Clean = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+    const buffer = Buffer.from(base64Clean, 'base64');
+    let detectedMime = mimeType || 'application/octet-stream';
+    if (base64Data.startsWith('data:')) {
+      const match = base64Data.match(/^data:([^;]+);/);
+      if (match && match[1]) {
+        detectedMime = match[1];
+      }
+    }
+
+    // 1. In-Memory Cache
+    attachmentCache.set(attachmentId, { buffer, mimeType: detectedMime, fileName });
+
+    // 2. Local Disk Cache
+    try {
+      const dir = path.join(process.cwd(), 'data', 'attachments');
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(path.join(dir, `${attachmentId}.bin`), buffer);
+      fs.writeFileSync(
+        path.join(dir, `${attachmentId}.meta.json`),
+        JSON.stringify({ fileName, mimeType: detectedMime })
+      );
+    } catch (diskErr: any) {
+      console.warn("Local disk attachment write skipped:", diskErr.message);
+    }
+
+    // 3. Firestore Cloud Backup
+    try {
+      if (isFirestoreEnabled()) {
+        await db.collection('attachments').doc(attachmentId).set({
+          fileName,
+          mimeType: detectedMime,
+          data: base64Clean,
+          createdAt: new Date().toISOString()
+        });
+      }
+    } catch (fsErr: any) {
+      console.warn("Firestore attachment backup skipped:", fsErr.message);
+    }
+  } catch (err: any) {
+    console.error("Save attachment error:", err);
   }
 };
 
@@ -922,6 +1027,66 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// --- Attachment Viewer / Direct Download Endpoint ---
+app.get("/api/attachments/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    // 1. In-Memory Cache
+    if (attachmentCache.has(id)) {
+      const item = attachmentCache.get(id)!;
+      res.setHeader("Content-Type", item.mimeType || "application/octet-stream");
+      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(item.fileName || 'receipt')}"`);
+      return res.send(item.buffer);
+    }
+
+    // 2. Local Disk Cache
+    const binPath = path.join(process.cwd(), 'data', 'attachments', `${id}.bin`);
+    const metaPath = path.join(process.cwd(), 'data', 'attachments', `${id}.meta.json`);
+    if (fs.existsSync(binPath)) {
+      const buffer = fs.readFileSync(binPath);
+      let mimeType = "application/octet-stream";
+      let fileName = "receipt";
+      if (fs.existsSync(metaPath)) {
+        try {
+          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          mimeType = meta.mimeType || mimeType;
+          fileName = meta.fileName || fileName;
+        } catch (_) {}
+      }
+      attachmentCache.set(id, { buffer, mimeType, fileName });
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(fileName)}"`);
+      return res.send(buffer);
+    }
+
+    // 3. Firestore Cloud Storage Backup
+    try {
+      if (isFirestoreEnabled()) {
+        const doc = await db.collection('attachments').doc(id).get();
+        if (doc.exists) {
+          const data = doc.data();
+          if (data?.data) {
+            const buffer = Buffer.from(data.data, 'base64');
+            const mimeType = data.mimeType || "application/octet-stream";
+            const fileName = data.fileName || "receipt";
+            attachmentCache.set(id, { buffer, mimeType, fileName });
+            res.setHeader("Content-Type", mimeType);
+            res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(fileName)}"`);
+            return res.send(buffer);
+          }
+        }
+      }
+    } catch (fsErr: any) {
+      console.warn("Firestore attachment fetch error:", fsErr.message);
+    }
+
+    res.status(404).send("Attachment document or image not found.");
+  } catch (err: any) {
+    console.error("Attachment retrieval error:", err);
+    res.status(500).send(`Error retrieving attachment: ${err.message}`);
+  }
+});
+
 // 1. Submit Claim
 app.post("/api/claim", async (req, res) => {
   try {
@@ -933,7 +1098,7 @@ app.post("/api/claim", async (req, res) => {
     const submissionId = `EXP-${Date.now()}`;
     const timestamp = getIndianTimestamp();
 
-    // Process File Uploads (Safe Google Drive attachment helper)
+    // Process File Uploads (Safe Google Drive attachment helper with resilient cloud fallback)
     let driveClient: any = null;
     try {
       driveClient = await getDriveClient();
@@ -941,21 +1106,35 @@ app.post("/api/claim", async (req, res) => {
       console.warn("Google Drive client not available (using mockup values):", e.message);
     }
 
+    const baseUrl = getBaseUrl(req);
     const processedItems = await Promise.all(items.map(async (item: any, idx: number) => {
-      let attachmentUrl = item.attachment;
-      if (item.fileData && item.fileName && driveClient) {
-        try {
-          attachmentUrl = await uploadToDrive(
-            `${submissionId}_item${idx+1}_${item.fileName}`,
-            item.fileData,
-            item.fileType
-          ) || "Upload Failed";
-        } catch (uploadError) {
-          console.error("Google Drive Upload failed:", uploadError);
-          attachmentUrl = "Upload Failed (Google Drive Error)";
+      let attachmentUrl = item.attachment || "";
+      if (item.fileData && item.fileName) {
+        const attachmentId = `${submissionId}_item${idx+1}_${Math.random().toString(36).substring(2, 6)}`;
+        // Save locally and to Firestore so a guaranteed working link is ALWAYS available
+        await saveAttachmentLocallyAndCloud(attachmentId, item.fileName, item.fileData, item.fileType);
+        const fallbackUrl = `${baseUrl}/api/attachments/${attachmentId}`;
+
+        if (driveClient) {
+          try {
+            const driveRes = await uploadToDrive(
+              `${submissionId}_item${idx+1}_${item.fileName}`,
+              item.fileData,
+              item.fileType
+            );
+            if (driveRes && driveRes.startsWith("http")) {
+              attachmentUrl = driveRes;
+            } else {
+              console.warn("Drive returned non-link (quota / permission). Using direct attachment URL:", fallbackUrl);
+              attachmentUrl = fallbackUrl;
+            }
+          } catch (uploadError) {
+            console.error("Google Drive Upload failed. Using fallback URL:", uploadError);
+            attachmentUrl = fallbackUrl;
+          }
+        } else {
+          attachmentUrl = fallbackUrl;
         }
-      } else if (item.fileData && item.fileName) {
-        attachmentUrl = item.attachment || "Attachment Loaded (Local Copy Only)";
       }
       return { ...item, attachment: attachmentUrl };
     }));
@@ -1522,19 +1701,30 @@ app.post("/api/claims", async (req, res) => {
     }
 
     let attachmentUrl = "";
-    if (fileBase64 && fileName && driveClient) {
-      try {
-        attachmentUrl = await uploadToDrive(
-          `${submissionId}_${fileName}`,
-          fileBase64,
-          "application/octet-stream"
-        ) || "";
-      } catch (uploadError) {
-        console.error("Flat upload to Drive failed:", uploadError);
-        attachmentUrl = "Upload Failed (Google Drive Error)";
+    if (fileBase64 && fileName) {
+      const attachmentId = `${submissionId}_${Math.random().toString(36).substring(2, 6)}`;
+      await saveAttachmentLocallyAndCloud(attachmentId, fileName, fileBase64, "application/octet-stream");
+      const fallbackUrl = `${getBaseUrl(req)}/api/attachments/${attachmentId}`;
+
+      if (driveClient) {
+        try {
+          const driveRes = await uploadToDrive(
+            `${submissionId}_${fileName}`,
+            fileBase64,
+            "application/octet-stream"
+          );
+          if (driveRes && driveRes.startsWith("http")) {
+            attachmentUrl = driveRes;
+          } else {
+            attachmentUrl = fallbackUrl;
+          }
+        } catch (uploadError) {
+          console.error("Flat upload to Drive failed. Using fallback URL:", uploadError);
+          attachmentUrl = fallbackUrl;
+        }
+      } else {
+        attachmentUrl = fallbackUrl;
       }
-    } else if (fileBase64 && fileName) {
-      attachmentUrl = "Attachment Loaded (Local Copy Only)";
     }
 
     const localRows = [{
