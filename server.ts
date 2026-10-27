@@ -523,7 +523,11 @@ const getDriveClient = async () => {
   return google.drive({ version: "v3", auth: auth as any });
 };
 
-const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1chWoPA4oh7Ss2Xy2jZmUCTDRnmcbDU8L4ojsy46mJh8";
+// Official Ginza Company Google Sheet containing all 820+ live historical and branch claims
+const COMPANY_SHEET_ID = "1chWoPA4oh7Ss2Xy2jZmUCTDRnmcbDU8L4ojsy46mJh8";
+const SHEET_ID = (process.env.GOOGLE_SHEET_ID && process.env.GOOGLE_SHEET_ID.trim() !== "" && process.env.GOOGLE_SHEET_ID !== "1L6iVHvBuknqum6lFf26BAp1_wrEwyyqwnj5o3lznCZ4")
+  ? process.env.GOOGLE_SHEET_ID.trim()
+  : COMPANY_SHEET_ID;
 
 // Helper to extract clean alphanumeric Google Drive Folder ID from plain string or full Drive URL
 const extractDriveFolderId = (rawInput?: string): string => {
@@ -870,40 +874,104 @@ const saveAttachmentLocallyAndCloud = async (
 };
 
 // --- Email Helper ---
+const SMTP_USER = process.env.SMTP_USER || "expenses.ginzalimited@gmail.com";
+const SMTP_PASS = (process.env.SMTP_PASS || "bcxc afvr gljx bpqy").replace(/\s+/g, "");
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
   port: parseInt(process.env.SMTP_PORT || "465"),
   secure: true,
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    user: SMTP_USER,
+    pass: SMTP_PASS,
   },
 });
 
 const sendMail = async (to: string, cc: string, subject: string, text: string, fromName?: string, replyTo?: string) => {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+  if (!SMTP_USER || !SMTP_PASS) {
     console.warn("SMTP credentials missing. Email skipped.");
     return;
   }
   try {
-    // We use a display name that includes the user's email if provided
-    // but the actual 'from' address must remain the authenticated SMTP_USER to avoid spam filters/refusal
-    const displayName = fromName ? `${fromName}${replyTo ? ` (${replyTo})` : ''}` : (process.env.SMTP_USER_NAME || 'Expense System');
+    // Avoid putting @ginzalimited.com internal addresses into the display name as it triggers strict corporate anti-spoofing filters
+    const displayName = fromName ? `${fromName} via Ginza Portal` : (process.env.SMTP_USER_NAME || 'Ginza Reimbursement Portal');
     
     const isHtml = text.trim().startsWith("<") || text.includes("<table") || text.includes("<div");
+    const cleanTo = (to || "").split(",").map(e => e.trim()).filter(Boolean).join(", ");
+    const cleanCc = (cc || "").split(",").map(e => e.trim()).filter(Boolean).join(", ");
+
+    if (!cleanTo) {
+      console.warn("sendMail: recipient 'to' address is empty. Email skipped.");
+      return;
+    }
+
     await transporter.sendMail({
-      from: `"${displayName}" <${process.env.SMTP_USER}>`,
-      replyTo: replyTo || process.env.SMTP_USER,
-      to,
-      cc,
+      from: `"${displayName}" <${SMTP_USER}>`,
+      replyTo: replyTo && replyTo.includes("@") ? replyTo : SMTP_USER,
+      to: cleanTo,
+      cc: cleanCc || undefined,
       subject,
       text: isHtml ? text.replace(/<[^>]*>/g, '') : text,
       html: isHtml ? text : undefined,
+      headers: {
+        'X-Priority': '1',
+        'X-MSMail-Priority': 'High',
+        'Importance': 'High'
+      }
     });
-    console.log(`Email sent to ${to} (CC: ${cc})`);
+    console.log(`[SMTP SUCCESS] Dispatched email to: ${cleanTo} (CC: ${cleanCc || 'none'}), Subject: ${subject}`);
   } catch (error) {
-    console.error("Email error:", error);
+    console.error("[SMTP ERROR] Email send failed:", error);
   }
+};
+
+const getClaimAdmins = (claimantNameStr: string = "", claimantEmailStr: string = "") => {
+  const adminEmailsStr = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
+  const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(e => e && e.toLowerCase() !== "ashok.sethia@ginzalimited.com");
+  if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
+    adminsList.push("arvind.sethia@ginzalimited.com");
+  }
+  if (!adminsList.includes("rohit.sethia@ginzalimited.com")) {
+    adminsList.push("rohit.sethia@ginzalimited.com");
+  }
+  if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
+    adminsList.push("mis.mumbai@ginzalimited.com");
+  }
+
+  const combined = `${claimantNameStr} ${claimantEmailStr}`.toLowerCase();
+  if (combined.includes("hari") || combined.includes("bhaskar") || combined.includes("hari.bhaskar")) {
+    if (!adminsList.includes("amrit.sethia@ginzalimited.com")) {
+      adminsList.push("amrit.sethia@ginzalimited.com");
+    }
+  }
+  return adminsList;
+};
+
+const getSubmissionToRecipients = (claimantNameStr: string = "", claimantEmailStr: string = "") => {
+  const toList = ["rohit.sethia@ginzalimited.com", "arvind.sethia@ginzalimited.com"];
+  const combined = `${claimantNameStr} ${claimantEmailStr}`.toLowerCase();
+  if (combined.includes("hari") || combined.includes("bhaskar") || combined.includes("hari.bhaskar")) {
+    if (!toList.includes("amrit.sethia@ginzalimited.com")) {
+      toList.push("amrit.sethia@ginzalimited.com");
+    }
+  }
+  return toList.join(",");
+};
+
+const getAccountsMailForClaim = (branchNameStr: string = "", claimantNameStr: string = "", claimantEmailStr: string = "") => {
+  const BRANCH_EMAILS: Record<string, string> = {
+    "Ludhiana": "kavita.acharya@ginzalimited.com",
+    "Mumbai": "kavita.acharya@ginzalimited.com",
+    "Jaipur": "kavita.acharya@ginzalimited.com",
+    "Bangalore": "cash.udhna@ginzalimited.com",
+    "Surat": "cash.udhna@ginzalimited.com",
+    "Tirupur": "cash.udhna@ginzalimited.com"
+  };
+  const combined = `${claimantNameStr} ${claimantEmailStr}`.toLowerCase();
+  if (combined.includes("hari") || combined.includes("bhaskar") || combined.includes("hari.bhaskar")) {
+    return "kavita.acharya@ginzalimited.com";
+  }
+  return BRANCH_EMAILS[branchNameStr] || "cash.udhna@ginzalimited.com";
 };
 
 // --- API Routes ---
@@ -973,7 +1041,7 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    if ((lowerEmail === "mis.mumbai@ginzalimited.com" || lowerEmail === "arvind.sethia@ginzalimited.com" || lowerEmail === "rohit.sethia@ginzalimited.com") && (password === "admin" || password === "admin123")) {
+    if ((lowerEmail === "mis.mumbai@ginzalimited.com" || lowerEmail === "arvind.sethia@ginzalimited.com" || lowerEmail === "rohit.sethia@ginzalimited.com" || lowerEmail === "amrit.sethia@ginzalimited.com") && (password === "admin" || password === "admin123")) {
       const displayName = lowerEmail === "mis.mumbai@ginzalimited.com" ? "Mumbai Admin" : lowerEmail.split("@")[0].replace(/\./g, " ").toUpperCase();
       return res.json({
         success: true,
@@ -1272,8 +1340,8 @@ app.post("/api/claim", async (req, res) => {
       const emailSubject = `New Claim Submitted - ${salespersonName} (${branchName})`;
       const emailBody = `Dear Team,\n\nA new expense claim has been successfully submitted by ${salespersonName}.\n\n--- Claimant Information ---\nName: ${salespersonName}\nEmail: ${salespersonEmail}\nBranch: ${branchName}\nSubmission ID: ${submissionId}\nTotal Amount: ₹${grandTotal}\nTotal Items: ${items.length}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nApplication Portal:\nhttps://expenses-form-one.vercel.app/\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
 
-      // To: rohit, arvind
-      const toRecipients = "rohit.sethia@ginzalimited.com,arvind.sethia@ginzalimited.com";
+      // To: rohit, arvind (+ amrit.sethia if Hari Bhaskar)
+      const toRecipients = getSubmissionToRecipients(salespersonName, salespersonEmail);
 
       // CC: branch head, ea, mis
       const ccEmailsArray = [
@@ -1846,8 +1914,8 @@ app.post("/api/claims", async (req, res) => {
       const emailSubject = `New Claim Submitted - ${claimantName} (${branch})`;
       const emailBody = `Dear Team,\n\nA new expense claim of ₹${amount} has been successfully submitted by ${claimantName}.\n\n--- Claimant Information ---\nName: ${claimantName}\nEmail: ${claimantEmail}\nBranch: ${branch}\nSubmission ID: ${submissionId}\n\nGoogle Spreadsheet Link:\nhttps://docs.google.com/spreadsheets/d/${SHEET_ID}\n\nApplication Portal:\nhttps://expenses-form-one.vercel.app/\n\nPlease click on the review link or log into the Admin portal to manage this claim.`;
 
-      // To: rohit, arvind
-      const toRecipients = "rohit.sethia@ginzalimited.com,arvind.sethia@ginzalimited.com";
+      // To: rohit, arvind (+ amrit.sethia if Hari Bhaskar)
+      const toRecipients = getSubmissionToRecipients(claimantName, claimantEmail);
 
       // CC: branch head, ea, mis
       const ccEmailsArray = [
@@ -2144,26 +2212,69 @@ app.post("/api/claims/action", async (req, res) => {
           requestBody: { values: [["Yes", `${adminName} - ${timestamp}`, "Payment Process On Going"]] },
         });
       } else if (action === "RELEASE") {
-        // Column T (Payment Release), U (Released By)
-        const range = `${targetSheet}!T${rowIndex}:U${rowIndex}`;
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SHEET_ID,
-          range: range,
-          valueInputOption: "USER_ENTERED",
-          requestBody: { values: [["Yes", `${adminName} - ${timestamp}`]] },
-        });
+        // Find and update all rows matching submission ID in Google Sheet
+        try {
+          const sheetValuesResponse = await sheets.spreadsheets.values.get({
+            spreadsheetId: SHEET_ID,
+            range: `${targetSheet}!A:B`
+          });
+          const bRows = sheetValuesResponse.data.values || [];
+          const matchedIndices: number[] = [];
+          for (let bIdx = 0; bIdx < bRows.length; bIdx++) {
+            if (bRows[bIdx] && (bRows[bIdx][1] === id || bRows[bIdx][0] === id)) {
+              matchedIndices.push(bIdx + 1);
+            }
+          }
 
-        // Column S - Status state
-        const statusRange = `${targetSheet}!S${rowIndex}`;
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SHEET_ID,
-          range: statusRange,
-          valueInputOption: "USER_ENTERED",
-          requestBody: { values: [["Released"]] },
-        });
+          const targetRows = matchedIndices.length > 0 ? matchedIndices : [rowIndex];
+          for (const rNum of targetRows) {
+            // Column S (Status), T (Payment Release), U (Released By)
+            await sheets.spreadsheets.values.update({
+              spreadsheetId: SHEET_ID,
+              range: `${targetSheet}!S${rNum}:U${rNum}`,
+              valueInputOption: "USER_ENTERED",
+              requestBody: { values: [["Released", "Payment Release", `${adminName} - ${timestamp}`]] },
+            });
+
+            if (mappedComment && mappedComment !== "Released" && mappedComment !== "Payment Release") {
+              await sheets.spreadsheets.values.update({
+                spreadsheetId: SHEET_ID,
+                range: `${targetSheet}!M${rNum}`,
+                valueInputOption: "USER_ENTERED",
+                requestBody: { values: [[mappedComment]] },
+              });
+            }
+          }
+        } catch (releaseErr: any) {
+          console.warn("Multi-row release write fallback:", releaseErr.message);
+          // Column T (Payment Release), U (Released By)
+          const range = `${targetSheet}!T${rowIndex}:U${rowIndex}`;
+          await sheets.spreadsheets.values.update({
+            spreadsheetId: SHEET_ID,
+            range: range,
+            valueInputOption: "USER_ENTERED",
+            requestBody: { values: [["Payment Release", `${adminName} - ${timestamp}`]] },
+          });
+
+          // Column S - Status state
+          const statusRange = `${targetSheet}!S${rowIndex}`;
+          await sheets.spreadsheets.values.update({
+            spreadsheetId: SHEET_ID,
+            range: statusRange,
+            valueInputOption: "USER_ENTERED",
+            requestBody: { values: [["Released"]] },
+          });
+        }
       }
     } catch (sheetError: any) {
       console.warn("Sheets action edit bypassed:", sheetError.message);
+    }
+
+    // Direct close or skip email check: "no mail if direct close claim from sides"
+    const skipEmail = req.body.skipEmail === true || req.body.directClose === true || req.body.noEmail === true;
+    if (skipEmail) {
+      console.log(`[ACTION] Direct close for ${id}: Mails skipped as requested. No email sent.`);
+      return res.json({ success: true, message: "Claim closed without sending email." });
     }
 
     // Mail alerts
@@ -2171,17 +2282,7 @@ app.post("/api/claims/action", async (req, res) => {
       const targetClaimant = claimantEmail || "";
       const bHeadEmail = claim ? claim.branchheademail : "";
       
-      const adminEmailsStr = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
-      const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(e => e && e.toLowerCase() !== "ashok.sethia@ginzalimited.com");
-      if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
-        adminsList.push("arvind.sethia@ginzalimited.com");
-      }
-      if (!adminsList.includes("rohit.sethia@ginzalimited.com")) {
-        adminsList.push("rohit.sethia@ginzalimited.com");
-      }
-      if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
-        adminsList.push("mis.mumbai@ginzalimited.com");
-      }
+      const adminsList = getClaimAdmins(employeeName, employeeEmail);
       const adminEmails = adminsList.join(",");
 
       // Resolve claim detail variables
@@ -2213,17 +2314,7 @@ app.post("/api/claims/action", async (req, res) => {
       const attachmentLink = claim ? (claim.attachmentlink || claim.attachment || "") : "";
       const attachmentHtml = attachmentLink ? `<p style="margin-top: 15px;"><strong>Attachment Link:</strong> <a href="${attachmentLink}" style="color: #2563eb; text-decoration: underline;" target="_blank">View Claim Document/Receipt</a></p>` : "";
 
-      // Branch Emails Mapping
-      const BRANCH_EMAILS: Record<string, string> = {
-        "Ludhiana": "kavita.acharya@ginzalimited.com",
-        "Mumbai": "kavita.acharya@ginzalimited.com",
-        "Jaipur": "kavita.acharya@ginzalimited.com",
-        "Bangalore": "cash.udhna@ginzalimited.com",
-        "Surat": "cash.udhna@ginzalimited.com",
-        "Tirupur": "cash.udhna@ginzalimited.com"
-      };
-
-      const accountsMail = BRANCH_EMAILS[claimBranch] || "cash.udhna@ginzalimited.com";
+      const accountsMail = getAccountsMailForClaim(claimBranch, employeeName, employeeEmail);
 
       if (action === "REMARK") {
         const mailBody = `Dear ${employeeName},\n\nYour claims submission with ID: ${id} (₹${amount}) was Rejected / Remarked by Admin:\n\n"${mappedComment}"\n\nPlease check the portal to update your transactions logs:\nhttps://expenses-form-one.vercel.app/\n\nThank you,\nExpense Department`;
@@ -2359,13 +2450,15 @@ app.post("/api/claims/action", async (req, res) => {
   </div>
 </div>`;
 
+        const isHari = (employeeName + " " + employeeEmail).toLowerCase().includes("hari") || employeeEmail.toLowerCase().includes("hari.bhaskar");
         const ccEmails = [
           employeeEmail,
           bHeadEmail,
           "ea.mumbai@ginzalimited.com",
           "mis.mumbai@ginzalimited.com",
           "arvind.sethia@ginzalimited.com",
-          "rohit.sethia@ginzalimited.com"
+          "rohit.sethia@ginzalimited.com",
+          isHari ? "amrit.sethia@ginzalimited.com" : ""
         ].filter(e => e && e.trim() !== "");
         const uniqueCC = Array.from(new Set(ccEmails)).filter(e => e.toLowerCase() !== accountsMail.toLowerCase());
         const ccString = uniqueCC.join(",");
@@ -2693,30 +2786,10 @@ app.post("/api/admin/action", async (req, res) => {
       const gTotal = claim ? claim.grandtotal : (data?.grandtotal || "0");
       const bHeadEmail = claim ? claim.branchheademail : (data?.branchheademail || "");
       
-      const adminEmailsStr = process.env.ADMIN_EMAILS || "arvind.sethia@ginzalimited.com,rohit.sethia@ginzalimited.com";
-      const adminsList = adminEmailsStr.split(",").map(e => e.trim()).filter(e => e && e.toLowerCase() !== "ashok.sethia@ginzalimited.com");
-      if (!adminsList.includes("arvind.sethia@ginzalimited.com")) {
-        adminsList.push("arvind.sethia@ginzalimited.com");
-      }
-      if (!adminsList.includes("rohit.sethia@ginzalimited.com")) {
-        adminsList.push("rohit.sethia@ginzalimited.com");
-      }
-      if (!adminsList.includes("mis.mumbai@ginzalimited.com")) {
-        adminsList.push("mis.mumbai@ginzalimited.com");
-      }
+      const adminsList = getClaimAdmins(sName, sEmail);
       const adminEmails = adminsList.join(",");
-      
-      // Branch Emails Mapping
-      const BRANCH_EMAILS: Record<string, string> = {
-        "Ludhiana": "kavita.acharya@ginzalimited.com",
-        "Mumbai": "kavita.acharya@ginzalimited.com",
-        "Jaipur": "kavita.acharya@ginzalimited.com",
-        "Bangalore": "cash.udhna@ginzalimited.com",
-        "Surat": "cash.udhna@ginzalimited.com",
-        "Tirupur": "cash.udhna@ginzalimited.com"
-      };
 
-      const accountsMail = BRANCH_EMAILS[bName] || "cash.udhna@ginzalimited.com";
+      const accountsMail = getAccountsMailForClaim(bName, sName, sEmail);
 
       if (action === "REMARK") {
         await sendMail(

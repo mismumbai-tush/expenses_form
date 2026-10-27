@@ -23,9 +23,21 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
-  Loader2
+  Loader2,
+  Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+const AUTHORIZED_ADMINS = [
+  'mis.mumbai@ginzalimited.com',
+  'arvind.sethia@ginzalimited.com',
+  'rohit.sethia@ginzalimited.com',
+  'amrit.sethia@ginzalimited.com',
+  'kavita.acharya@ginzalimited.com',
+  'cash.udhna@ginzalimited.com',
+  'ea.mumbai@ginzalimited.com',
+  'expenses.ginzalimited@gmail.com'
+];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'raise' | 'admin'>('raise');
@@ -173,9 +185,21 @@ export default function App() {
     }
   };
 
+  // Restore persisted admin session from local storage
+  useEffect(() => {
+    try {
+      const savedAdmin = localStorage.getItem('ginza_admin_email');
+      if (savedAdmin && AUTHORIZED_ADMINS.includes(savedAdmin.toLowerCase())) {
+        setIsAdminLoggedIn(true);
+        setAdminLoggedInEmail(savedAdmin.toLowerCase());
+        setAdminEmailInput(savedAdmin.toLowerCase());
+      }
+    } catch (_) {}
+  }, []);
+
   useEffect(() => {
     fetchClaims();
-  }, []);
+  }, [activeTab]);
 
   // Set claimant when salesperson profile changes
   useEffect(() => {
@@ -292,24 +316,21 @@ export default function App() {
   };
 
   // Admin Verification Login Action
-  const handleAdminVerify = (e: React.FormEvent) => {
-    e.preventDefault();
-    const normalizedInput = adminEmailInput.trim().toLowerCase();
-    
-    const AUTHORIZED_ADMINS = [
-      'cash.udhna@ginzalimited.com',
-      'kavita.acharya@ginzalimited.com',
-      'rohit.sethia@ginzalimited.com',
-      'arvind.sethia@ginzalimited.com',
-      'mis.mumbai@ginzalimited.com',
-      'ea.mumbai@ginzalimited.com'
-    ];
+  const handleAdminVerify = (e?: React.FormEvent, directEmail?: string) => {
+    if (e) e.preventDefault();
+    const raw = directEmail !== undefined ? directEmail : adminEmailInput;
+    const normalizedInput = raw.trim().toLowerCase();
     
     // Accept standard authorized email list
-    if (AUTHORIZED_ADMINS.includes(normalizedInput) || normalizedInput === 'expenses.ginzalimited@gmail.com') {
+    if (AUTHORIZED_ADMINS.includes(normalizedInput)) {
       setIsAdminLoggedIn(true);
       setAdminLoggedInEmail(normalizedInput);
+      setAdminEmailInput(normalizedInput);
       setAdminEmailError('');
+      try {
+        localStorage.setItem('ginza_admin_email', normalizedInput);
+      } catch (_) {}
+      fetchClaims();
     } else {
       setAdminEmailError('Access Denied. Email address is not in the authorized Admin / Accounts list.');
     }
@@ -415,7 +436,7 @@ export default function App() {
     }
   };
 
-  // Force-close claim to mark status as Closed (Released) in sheets and database
+  // Force-close claim to mark status as Closed (Released) in sheets and database WITHOUT sending emails
   const handleForceCloseClaim = async () => {
     if (!selectedClaim) return;
     
@@ -424,7 +445,7 @@ export default function App() {
       return;
     }
 
-    setActionStatus({ type: 'updating', message: `Marking claim ${selectedClaim.id} as Closed...` });
+    setActionStatus({ type: 'updating', message: `Marking claim ${selectedClaim.id} as Closed (No Email)...` });
     setCloseSidebarConfirm(false);
 
     try {
@@ -435,7 +456,7 @@ export default function App() {
         body: JSON.stringify({
           id: selectedClaim.id,
           status: 'Released',
-          remarks: 'Manually closed by Admin override',
+          remarks: remarksState || 'Manually closed by Admin (Direct Close - No Email)',
           claimantEmail: selectedClaim.claimantEmail,
           title: selectedClaim.title,
           amount: originalTotal,
@@ -443,12 +464,24 @@ export default function App() {
           holdItemIndexes: [],
           rowIndex: (selectedClaim as any).rowIndex,
           branchName: (selectedClaim as any).sheetName,
-          adminEmail: adminLoggedInEmail
+          adminEmail: adminLoggedInEmail,
+          skipEmail: true,
+          directClose: true,
+          noEmail: true
         })
       });
 
       if (resData && resData.success) {
-        setActionStatus({ type: 'success', message: 'Successfully closed/released the claim.' });
+        // Record closed ID in localStorage for persistence
+        try {
+          const storedClosed = JSON.parse(localStorage.getItem('ginza_manually_closed_ids') || '[]');
+          if (!storedClosed.includes(selectedClaim.id)) {
+            storedClosed.push(selectedClaim.id);
+            localStorage.setItem('ginza_manually_closed_ids', JSON.stringify(storedClosed));
+          }
+        } catch (_) {}
+
+        setActionStatus({ type: 'success', message: 'Successfully closed claim. No emails sent.' });
         setTimeout(() => {
           setSelectedClaim(null);
           setRemarksState('');
@@ -456,7 +489,7 @@ export default function App() {
           setActionStatus({ type: 'idle', message: '' });
         }, 1500);
 
-        // Reload data
+        // Instantly reload claims
         fetchClaims();
       } else {
         setActionStatus({ type: 'error', message: resData?.error || 'Failed to close claim.' });
@@ -466,24 +499,49 @@ export default function App() {
     }
   };
 
-  // Normalizes status strings from various database/Google Sheets formats for consistent UI matching
-  const normalizeStatus = (statusStr: string | undefined): string => {
-    if (!statusStr) return "Pending";
-    const lower = statusStr.trim().toLowerCase();
-    if (lower === "pending" || lower === "no" || lower === "") return "Pending";
-    if (lower === "approved" || lower === "approved_process" || lower === "approved & processed") return "Approved";
-    if (lower === "processed" || lower === "payment process on going" || lower === "payment process ongoing" || lower === "payment_process_on_going" || lower === "payment process under going") {
-      return "Processed";
-    }
-    if (lower === "released") return "Released";
-    if (lower === "rejected") return "Rejected";
-    return "Pending"; // Map any unrecognized status to Pending to enable Resolve button
+  // Helper functions to accurately match status and release indicators from Google Sheet
+  const isReleasedEntry = (item: any): boolean => {
+    if (!item) return false;
+    const pr = String(item.paymentRelease || item.paymentrelease || '').trim().toLowerCase();
+    const st = String(item.status || '').trim().toLowerCase();
+    const rb = String(item.releasedBy || item.releasedby || '').trim();
+    if (rb && rb !== '-' && rb !== 'no') return true;
+    if (['payment release', 'payemtn release', 'released', 'yes', 'closed', 'paid', 'done'].includes(pr)) return true;
+    if (pr.includes('sethia') || pr.includes('cash') || pr.includes('2026') || pr.includes('arvind') || pr.includes('mumbai') || pr.includes('kavita')) return true;
+    if (['released', 'closed', 'paid', 'finalized'].includes(st)) return true;
+    return false;
+  };
+
+  const isProcessedEntry = (item: any): boolean => {
+    if (!item) return false;
+    const pp = String(item.paymentProcess || item.paymentprocess || '').trim().toLowerCase();
+    const st = String(item.status || '').trim().toLowerCase();
+    const pb = String(item.processedBy || item.processedby || '').trim();
+    if (pb && pb !== '-' && pb !== 'no') return true;
+    if (['process payment', 'payment process', 'yes', 'processed', 'done'].includes(pp)) return true;
+    if (st.includes('payment process') || st === 'processed') return true;
+    return false;
+  };
+
+  const isApprovedEntry = (item: any): boolean => {
+    if (!item) return false;
+    const ap = String(item.approved || '').trim().toLowerCase();
+    const ad = String(item.approvedDetails || item.approveddetails || item.approvedTimestamp || item.approvedtimestamp || '').trim();
+    if (ad && ad !== '-' && ad !== 'no') return true;
+    if (ap === 'true' || ap === 'yes' || ap.includes('approved')) return true;
+    return false;
   };
 
   // Group claims by ID to show as single row per submission ID
   const groupedClaims = React.useMemo(() => {
     const map: { [key: string]: any } = {};
+    let localClosedIds: string[] = [];
+    try {
+      localClosedIds = JSON.parse(localStorage.getItem('ginza_manually_closed_ids') || '[]');
+    } catch (_) {}
+
     const closedIds = [
+      ...localClosedIds,
       "SUB-D5FBE8B4",
       "SUB-B611450F",
       "SUB-C9A1729C",
@@ -506,28 +564,13 @@ export default function App() {
     claims.forEach(c => {
       const id = c.id || "Unknown";
       if (!map[id]) {
-        let derivedStatus = normalizeStatus(c.status);
-        const rRelease = String(c.paymentRelease || (c as any).paymentrelease || "").trim().toLowerCase();
-        const rProcess = String(c.paymentProcess || (c as any).paymentprocess || "").trim().toLowerCase();
-        const rApproved = String(c.approved || "").trim().toLowerCase();
-
-        if (closedIds.includes(id.trim().toLowerCase())) {
-          derivedStatus = "Released";
-        } else if (rRelease === "yes" || rRelease === "released") {
-          derivedStatus = "Released";
-        } else if (rProcess === "yes" || rProcess === "processed" || rProcess === "payment process on going" || rProcess === "payment process ongoing" || rProcess === "payment_process_on_going" || rProcess === "payment process under going") {
-          derivedStatus = "Processed";
-        } else if (rApproved === "yes" || rApproved === "approved" || rApproved === "approved_process") {
-          derivedStatus = "Approved";
-        }
-
         map[id] = {
           id,
           submitDate: c.submitDate,
           claimantName: c.claimantName,
           claimantEmail: c.claimantEmail,
           branch: c.branch,
-          status: derivedStatus,
+          status: "Pending",
           remarks: c.remarks,
           rowIndex: c.rowIndex,
           sheetName: c.sheetName,
@@ -539,10 +582,34 @@ export default function App() {
           releasedBy: c.releasedBy,
           mailSent: c.mailSent || "No",
           holdItemIndexes: c.holdItemIndexes || [],
+          isReleased: false,
+          isProcessed: false,
+          isApproved: false,
           items: [],
           totalAmount: 0
         };
       }
+
+      // Check across every row item for released, processed, or approved flags
+      if (isReleasedEntry(c) || closedIds.includes(id.trim().toLowerCase())) {
+        map[id].isReleased = true;
+      }
+      if (isProcessedEntry(c)) {
+        map[id].isProcessed = true;
+      }
+      if (isApprovedEntry(c)) {
+        map[id].isApproved = true;
+      }
+
+      // Preserve non-empty signatures and details
+      if (c.paymentRelease && c.paymentRelease !== 'No') map[id].paymentRelease = c.paymentRelease;
+      if (c.releasedBy && c.releasedBy !== '-') map[id].releasedBy = c.releasedBy;
+      if (c.paymentProcess && c.paymentProcess !== 'No') map[id].paymentProcess = c.paymentProcess;
+      if (c.processedBy && c.processedBy !== '-') map[id].processedBy = c.processedBy;
+      if (c.approved && c.approved !== 'No') map[id].approved = c.approved;
+      if (c.approvedDetails) map[id].approvedDetails = c.approvedDetails;
+      if (c.mailSent && c.mailSent !== 'No') map[id].mailSent = c.mailSent;
+
       map[id].items.push({
         title: c.title,
         description: c.description,
@@ -552,6 +619,21 @@ export default function App() {
         attachmentUrl: c.attachmentUrl
       });
       map[id].totalAmount += Number(c.amount) || 0;
+    });
+
+    // Derive final consolidated status for each submission
+    Object.values(map).forEach((obj: any) => {
+      if (obj.isReleased) {
+        obj.status = "Released";
+      } else if (obj.isProcessed) {
+        obj.status = "Processed";
+      } else if (obj.isApproved) {
+        obj.status = "Approved";
+      } else if (String(obj.status).toLowerCase() === "rejected") {
+        obj.status = "Rejected";
+      } else {
+        obj.status = "Pending";
+      }
     });
     
     // Sort: Closed (Released or Rejected) claims are placed at the bottom, active with mailSent === "No" at the top, then by submitDate descending
@@ -766,7 +848,7 @@ export default function App() {
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">Select Salesperson Profile</label>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Select Employee Profile</label>
                       <select 
                         id="salesperson_select"
                         value={selectedSalesperson === 'custom' ? 'custom' : selectedSalesperson.email} 
@@ -1049,15 +1131,35 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+
+                  {/* + Add Row / Field Claim Button directly below Claim Row Item boxes */}
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      id="add_row_bottom_btn"
+                      onClick={handleAddLine}
+                      className="w-full py-3.5 px-4 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-900 border-2 border-dashed border-indigo-300 hover:border-indigo-400 rounded-xl text-sm font-bold flex items-center justify-center gap-2.5 transition-all shadow-sm cursor-pointer group"
+                    >
+                      <span className="p-1 rounded-full bg-indigo-600 text-white group-hover:scale-110 transition-transform flex items-center justify-center">
+                        <Plus className="h-4 w-4" />
+                      </span>
+                      <span>+ Add Row / Field Claim</span>
+                      <span className="text-xs font-semibold text-indigo-500">(Click to add Item #{expenseLines.length + 1})</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Actions Panel */}
-                <div className="pt-4 border-t border-slate-150 flex justify-end">
+                <div className="pt-4 border-t border-slate-150 flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div className="text-left w-full sm:w-auto">
+                    <p className="text-xs text-slate-500">Total Items: <span className="font-bold text-slate-800">{expenseLines.length}</span></p>
+                    <p className="text-sm font-bold text-slate-900">Grand Total: <span className="text-blue-600 text-lg font-black">₹{expenseLines.reduce((acc, line) => acc + (Number(line.amount) || 0), 0).toFixed(2)}</span></p>
+                  </div>
                   <button 
                     id="submit_claim_btn"
                     type="submit"
                     disabled={formStatus.type === 'submitting'}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-6 rounded-lg text-sm shadow-md transition-all disabled:opacity-50 flex items-center gap-2"
+                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-6 rounded-lg text-sm shadow-md transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {formStatus.type === 'submitting' ? (
                       <>
@@ -1119,16 +1221,21 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="bg-slate-50 border border-slate-150 p-3 rounded-lg space-y-2">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Authorized Admin / Accounts Emails:</p>
-                      <ul className="grid grid-cols-1 gap-1 text-[11px] text-slate-600 font-mono list-disc pl-4">
-                        <li>cash.udhna@ginzalimited.com</li>
-                        <li>kavita.acharya@ginzalimited.com</li>
-                        <li>rohit.sethia@ginzalimited.com</li>
-                        <li>arvind.sethia@ginzalimited.com</li>
-                        <li>mis.mumbai@ginzalimited.com</li>
-                        <li>ea.mumbai@ginzalimited.com</li>
-                      </ul>
+                    <div className="bg-slate-50 border border-slate-150 p-3.5 rounded-lg space-y-2">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Authorized Admin / Accounts Emails (Click to login):</p>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {AUTHORIZED_ADMINS.map(email => (
+                          <button
+                            key={email}
+                            type="button"
+                            onClick={() => handleAdminVerify(undefined, email)}
+                            className="w-full text-left px-2.5 py-1.5 rounded-md bg-white hover:bg-indigo-50 hover:border-indigo-300 border border-slate-200 text-xs font-mono text-slate-700 hover:text-indigo-700 transition-colors flex items-center justify-between group cursor-pointer"
+                          >
+                            <span className="truncate">{email}</span>
+                            <span className="text-[10px] text-indigo-500 opacity-0 group-hover:opacity-100 font-sans font-semibold transition-opacity">Quick Login &rarr;</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <button 
@@ -1180,6 +1287,10 @@ export default function App() {
                         onClick={() => {
                           setIsAdminLoggedIn(false);
                           setAdminEmailInput('');
+                          setAdminLoggedInEmail('');
+                          try {
+                            localStorage.removeItem('ginza_admin_email');
+                          } catch (_) {}
                         }}
                         className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 py-2 px-3 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all"
                       >
@@ -1237,7 +1348,7 @@ export default function App() {
                           <option value="Pending">Pending</option>
                           <option value="Approved">Approved</option>
                           <option value="Payment Process On Going">Payment Process On Going</option>
-                          <option value="Released">Released</option>
+                          <option value="Released">Closed / Released</option>
                           <option value="Rejected">Rejected</option>
                           <option value="Processed">Processed (Legacy)</option>
                         </select>
@@ -1860,22 +1971,51 @@ export default function App() {
                     </>
                   )}
 
+                  {selectedClaim.status === 'Pending' && (
+                    <button 
+                      type="button"
+                      onClick={handleForceCloseClaim}
+                      disabled={actionStatus.type === 'updating'}
+                      className="col-span-2 py-2 px-3 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                    >
+                      <CheckCircle className="h-3.5 w-3.5 text-slate-500" />
+                      Direct Close Claim (No Mail Sent)
+                    </button>
+                  )}
+
+                  {(selectedClaim.status === 'Processed' || selectedClaim.status === 'Payment Process On Going') && (
+                    <button 
+                      type="button"
+                      onClick={handleForceCloseClaim}
+                      disabled={actionStatus.type === 'updating'}
+                      className="col-span-2 py-2 px-3 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-800 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                    >
+                      <CheckCircle className="h-3.5 w-3.5 text-purple-600" />
+                      Direct Close Claim (No Mail Sent)
+                    </button>
+                  )}
+
                   {(selectedClaim.status === 'Released' || selectedClaim.status === 'Rejected') && (
                     <div className="col-span-2 text-center py-2 px-4 rounded bg-slate-100 border border-slate-200 text-slate-600 text-xs font-semibold">
-                      This transaction has been finalized as <span className="font-bold text-slate-800 underline">{selectedClaim.status}</span>. No further action is required.
+                      This transaction has been finalized as <span className="font-bold text-slate-800 underline">{selectedClaim.status === 'Released' ? 'Closed' : selectedClaim.status}</span>. No further action is required.
                     </div>
                   )}
                 </div>
 
                 <div className="pt-4 border-t border-slate-200 space-y-3">
                   {selectedClaim.status !== 'Released' && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex flex-col sm:flex-row justify-between items-center gap-2">
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3.5 flex flex-col sm:flex-row justify-between items-center gap-3">
                       <div>
-                        <p className="text-xs font-bold text-amber-800">Manual Close Override</p>
-                        <p className="text-[10px] text-amber-600 leading-tight">Directly force-close this claim. This will mark its status as Closed (Released) in Google Sheets and database logs.</p>
+                        <div className="flex items-center gap-1.5">
+                          <CheckCircle className="h-4 w-4 text-amber-700" />
+                          <p className="text-xs font-black text-amber-900 uppercase tracking-wide">Direct Close Claim (No Mail Sent)</p>
+                        </div>
+                        <p className="text-[11px] text-amber-750 mt-1 leading-snug">
+                          Convert this claim directly to <strong>Closed (Released)</strong> in Google Sheets and database logs. <strong>STRICTLY NO EMAILS</strong> will be sent to the employee, accounts, or admins.
+                        </p>
                       </div>
                       {closeSidebarConfirm ? (
-                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
                           <button
                             onClick={() => setCloseSidebarConfirm(false)}
                             className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded text-[11px] transition-all cursor-pointer"
@@ -1884,9 +2024,9 @@ export default function App() {
                           </button>
                           <button
                             onClick={handleForceCloseClaim}
-                            className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-[11px] hover:shadow transition-all cursor-pointer"
+                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded text-[11px] hover:shadow transition-all cursor-pointer"
                           >
-                            Confirm Close
+                            Confirm (No Mail)
                           </button>
                         </div>
                       ) : (
@@ -1894,10 +2034,10 @@ export default function App() {
                           id="force_close_claim_btn"
                           onClick={handleForceCloseClaim}
                           disabled={actionStatus.type === 'updating'}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-[11px] shadow hover:shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-[11px] shadow hover:shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <CheckCircle className="h-3.5 w-3.5" />
-                          Close Claim
+                          Close Claim (No Mail)
                         </button>
                       )}
                     </div>

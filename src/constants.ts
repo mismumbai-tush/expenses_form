@@ -29,6 +29,7 @@ export const BRANCH_DATA: Branch[] = [
     headEmail: "vishal.ambhore@ginzalimited.com",
     headPhone: "8805796399",
     salespeople: [
+      { name: "Hari Bhaskar", email: "hari.bhaskar@ginzalimited.com", phone: "" },
       { name: "Aditya", email: "tushpadavi1@gmail.com", phone: "8208628208" },
       { name: "Vishal Ambhore", email: "vishal.ambhore@ginzalimited.com", phone: "8805796399" },
       { name: "Amit Korgaonkar", email: "amit.korgaonkar@ginzalimited.com", phone: "9833181414" },
