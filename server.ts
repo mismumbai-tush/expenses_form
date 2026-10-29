@@ -2759,6 +2759,12 @@ app.post("/api/admin/action", async (req, res) => {
     }
 
     // --- 4. SECURE EMAIL ROUTING ---
+    const skipEmail = req.body.skipEmail === true || req.body.directClose === true || req.body.noEmail === true;
+    if (skipEmail) {
+      console.log(`[ADMIN ACTION] Direct close for ${claimId}: Mails skipped as requested. Strictly no email sent.`);
+      return res.json({ success: true, message: "Claim closed without sending email." });
+    }
+
     try {
       const claim = fallbackClaims.find(c => c.submissionid === claimId);
       const sName = claim ? claim.salespersonname : (data?.salespersonname || "Employee");
@@ -2803,10 +2809,10 @@ app.post("/api/admin/action", async (req, res) => {
       } 
       else if (action === "APPROVE") {
         await sendMail(
-          sEmail,
-          `${adminEmails},${bHeadEmail}`,
-          `Claim Approved: ${claimId}`,
-          `Dear ${sName},\n\nWe are pleased to inform you that your expense claim of ₹${gTotal} has been APPROVED by ${adminName} and has been forwarded for payment processing.\n\nSubmission ID: ${claimId}\nDate: ${timestamp}\n\nPortal Link: https://expenses-form-one.vercel.app/`,
+          accountsMail,
+          `${sEmail},${adminEmails},${bHeadEmail}`,
+          `APPROVED FOR PAYMENT: ${claimId} - ${sName} (₹${gTotal})`,
+          `Dear Accounts Department,\n\nThe following claim has been APPROVED by ${adminName} and forwarded for payment processing:\n\nClaimant: ${sName} (${sEmail})\nBranch: ${bName}\nAmount Approved: ₹${gTotal}\nSubmission ID: ${claimId}\nDate: ${timestamp}\n\nPlease proceed with payment verification and release.\n\nPortal Link: https://expenses-form-one.vercel.app/`,
           adminName,
           adminEmail
         );
@@ -2824,9 +2830,9 @@ app.post("/api/admin/action", async (req, res) => {
       else if (action === "RELEASE") {
         await sendMail(
           sEmail,
-          `${adminEmails},${bHeadEmail}`,
-          `PAYMENT RELEASED: ${claimId}`,
-          `Dear ${sName},\n\nWe are pleased to inform you that your expense claim payment of ₹${gTotal} has been released.\n\nTransaction processed by: ${adminName}\nDate: ${timestamp}\n\nPortal Link: https://expenses-form-one.vercel.app/`,
+          `${adminEmails},${bHeadEmail},${accountsMail}`,
+          `PAYMENT RELEASED: ${claimId} - ${sName} (₹${gTotal})`,
+          `Dear ${sName},\n\nWe are pleased to inform you that your expense claim payment of ₹${gTotal} has been successfully released by the Accounts Department.\n\nTransaction processed by: ${adminName}\nDate: ${timestamp}\n\nThank you!\nGinza Expense Reimbursement Portal`,
           adminName,
           adminEmail
         );
